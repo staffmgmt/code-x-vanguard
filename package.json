@@ -1,26 +1,27 @@
 {
-    "name": "code-x-vanguard",
-    "version": "0.0.1",
-    "private": true,
-    "scripts": {
-        "dev": "vite dev",
-        "build": "vite build",
-        "preview": "vite preview",
-        "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
-        "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch"
-    },
-    "devDependencies": {
-        "@sveltejs/adapter-cloudflare": "3.0.2",
-        "@sveltejs/kit": "2.5.7",
-        "@sveltejs/vite-plugin-svelte": "3.1.0",
-        "autoprefixer": "10.4.19",
-        "postcss": "8.4.38",
-        "svelte": "4.2.15",
-        "svelte-check": "3.7.1",
-        "tailwindcss": "3.4.3",
-        "tslib": "2.6.2",
-        "typescript": "5.4.5",
-        "vite": "5.2.10"
-    },
-    "type": "module"
+  "name": "code-x-vanguard",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "dev": "vite dev",
+    "build": "vite build",
+    "preview": "vite preview",
+    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+    "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch"
+  },
+  "devDependencies": {
+    "@sveltejs/adapter-auto": "^3.2.2",
+    "@sveltejs/adapter-cloudflare": "^4.6.1",
+    "@sveltejs/kit": "^2.5.7",
+    "@sveltejs/vite-plugin-svelte": "^3.1.0",
+    "svelte": "^4.2.18",
+    "svelte-check": "^3.8.4",
+    "tslib": "^2.6.3",
+    "typescript": "^5.5.3",
+    "vite": "^5.3.3"
+  },
+  "type": "module",
+  "overrides": {
+    "vite": "^5.3.3"
+  }
 }
