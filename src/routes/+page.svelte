@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { tick } from 'svelte';
 	import { fly } from 'svelte/transition';
-	import { createParser, type ParsedEvent, type ReconnectInterval } from 'eventsource-parser';
+	import { fetchEventSource } from '@microsoft/fetch-event-source';
 
 	// --- Core State ---
 	let messages: { id: number; type: 'user' | 'ai'; content: string; persona?: string }[] = [];
@@ -19,65 +19,72 @@
 	async function handleSubmit() {
 		if (!inputText.trim() || isThinking) return;
 
+		isThinking = true;
 		const userMessageContent = inputText;
 		const activePersona = currentPersona;
-		inputText = '';
-		isThinking = true;
 
-		// Add user message
+		// 1. Add user message and clear input
 		messages = [...messages, { id: Date.now(), type: 'user', content: userMessageContent }];
-		
-		// Add AI placeholder
-		messages = [...messages, { id: Date.now() + 1, type: 'ai', content: '', persona: activePersona }];
+		inputText = '';
 		await scrollToBottom();
+
+		// 2. Add AI placeholder message and get a stable index to it
+		const aiMessageId = Date.now() + 1;
+		messages = [...messages, { id: aiMessageId, type: 'ai', content: '', persona: activePersona }];
+		const aiMessageIndex = messages.length - 1;
 		
 		try {
-			const response = await fetch('/api/chat', {
+			// 3. RE-ARCHITECTED: Use fetchEventSource for robust streaming
+			await fetchEventSource('/api/chat', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ prompt: userMessageContent, persona: activePersona })
-			});
+				body: JSON.stringify({ prompt: userMessageContent, persona: activePersona }),
 
-			if (!response.ok || !response.body) {
-				const errorText = await response.text();
-				throw new Error(errorText || `API Error: ${response.status}`);
-			}
+				onopen: async (response) => {
+					if (!response.ok) {
+						isThinking = false; // Stop thinking on immediate error
+						const errorText = await response.text();
+						throw new Error(`API Error: ${response.status} ${response.statusText} - ${errorText}`);
+					}
+				},
 
-			const reader = response.body.getReader();
-			const decoder = new TextDecoder();
-			const onParse = (event: ParsedEvent | ReconnectInterval) => {
-				if (event.type === 'event' && event.data) {
+				onmessage: (event) => {
+					// The Gemini SSE format sends JSON data. We parse it here.
 					try {
 						const data = JSON.parse(event.data);
-						const newText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+						const newText = data.candidates?.[0]?.content?.parts?.map((part: { text: string }) => part.text).join('') || '';
+
 						if (newText) {
-							messages[messages.length - 1].content += newText;
-							messages = messages; // Trigger reactivity
+							messages[aiMessageIndex].content += newText;
+							messages = messages; // Trigger Svelte reactivity
 							scrollToBottom();
 						}
 					} catch (e) {
-						console.error('Error parsing stream data chunk:', e);
+						// This catches malformed JSON in the data stream.
+						console.error('Error parsing stream data chunk:', event.data, e);
 					}
+				},
+				
+				onerror: (err) => {
+					// This handles network errors or errors thrown from onopen.
+					// It will stop the request and the error will be caught by the outer catch block.
+					isThinking = false;
+					throw err;
+				},
+
+				onclose: () => {
+					// The stream has closed.
+					isThinking = false;
 				}
-			};
-			
-			const parser = createParser({ onParse });
+			});
 
-			while (true) {
-				const { done, value } = await reader.read();
-				if (done) break;
-				parser.feed(decoder.decode(value));
-			}
-
-		} catch (err) {
-			const message = err instanceof Error ? err.message : 'An unknown error occurred.';
-			console.error('Submit handler failed:', message);
-			messages[messages.length - 1].content = `Error: Could not get a response. ${message}`;
-
+		} catch (error) {
+			const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred.';
+			console.error('Failed to fetch stream:', error);
+			messages[aiMessageIndex].content = `Error: Could not get a response. ${errorMessage}`;
 		} finally {
-			// This ensures the UI is always responsive after a request finishes or fails.
 			isThinking = false;
-			messages = messages; // Final reactivity trigger
+			messages = messages; // Final reactivity trigger to update state
 			await scrollToBottom();
 		}
 	}
@@ -85,9 +92,7 @@
 	async function scrollToBottom() {
 		await tick();
 		const element = document.scrollingElement || document.documentElement;
-		if (element) {
-			element.scrollTop = element.scrollHeight;
-		}
+		element.scrollTop = element.scrollHeight;
 	}
 </script>
 
@@ -127,7 +132,7 @@
 							{personas.find((p) => p.name === message.persona)?.icon || '🤖'}
 						</div>
 						<div class="bg-white dark:bg-slate-800 p-4 rounded-xl max-w-lg">
-							<p class="whitespace-pre-wrap">{message.content}{isThinking && messages[messages.length - 1].id === message.id ? '...' : ''}</p>
+							<p class="whitespace-pre-wrap">{message.content}{isThinking && messages[messages.length - 1] === message ? '...' : ''}</p>
 						</div>
 					</div>
 				{/if}
