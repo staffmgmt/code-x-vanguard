@@ -148,12 +148,12 @@
         type="text"
         bind:value={inputText}
         placeholder={isThinking ? 'Agent is thinking...' : 'Message the agent...'}
-        disabled={isLoading}
+        disabled={isThinking}
         class="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg p-3 focus:ring-2 focus:ring-cyan-500 focus:outline-none disabled:opacity-50"
       />
       <button
         type="submit"
-        disabled={isLoading || !inputText.trim()}
+        disabled={isThinking || !inputText.trim()}
         class="bg-cyan-500 text-white font-bold py-3 px-5 rounded-lg hover:bg-cyan-600 disabled:bg-slate-500 disabled:cursor-not-allowed transition-colors"
       >
         Send
