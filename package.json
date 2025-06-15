@@ -29,6 +29,6 @@
     "vite": "^5.3.3"
   },
   "dependencies": {
-    "eventsource-parser": "^3.0.2"
+    "@microsoft/fetch-event-source": "^2.0.1"
   }
 }
