@@ -1,4 +1,5 @@
 import type { RequestHandler } from '@sveltejs/kit';
+import { error } from '@sveltejs/kit';
 
 export const POST: RequestHandler = async ({ request }) => {
     try {
@@ -7,36 +8,40 @@ export const POST: RequestHandler = async ({ request }) => {
         const systemInstruction = `Your current persona is '${persona}'. Respond in that distinct style, befitting your name and role.`;
         const finalPrompt = `${systemInstruction}\n\nUser Question: "${prompt}"`;
 
-        const keyResponse = await fetch('https://div3rcity.me/key');
-        if (!keyResponse.ok) throw new Error('Failed to fetch rotating API key.');
-        const geminiKey = await keyResponse.text();
-
-        const geminiApiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro-flash:streamGenerateContent?key=${geminiKey}`;
+        // The single, correct proxy endpoint provided by the General.
+        // NOTE: The model name is adapted from your curl command, but using the 'streamGenerateContent' method 
+        // from your original UI code to ensure the streaming works.
+        const proxyApiUrl = 'https://key.ematthew477.workers.dev/v1beta/models/gemini-2.5-flash-preview-05-20:streamGenerateContent';
         
         const apiRequestBody = {
             contents: [{ parts: [{ text: finalPrompt }] }],
         };
 
-        const geminiResponse = await fetch(geminiApiUrl, {
+        // This is now the ONLY fetch call made by this endpoint.
+        const proxyResponse = await fetch(proxyApiUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(apiRequestBody),
         });
 
-        if (!geminiResponse.body) throw new Error('Gemini API response has no body.');
+        // Check if the proxy itself returned an error.
+        if (!proxyResponse.ok) {
+            const errorBody = await proxyResponse.text();
+            throw new Error(`Proxy server failed with status ${proxyResponse.status}: ${errorBody}`);
+        }
 
-        return new Response(geminiResponse.body, { headers: { 'Content-Type': 'text/plain' } });
+        if (!proxyResponse.body) {
+            throw new Error('Proxy response has no body.');
+        }
 
-    } catch (error) {
-        console.error('Backend Error:', error);
-        
-        // PROTOCOL BEACON DIAGNOSTIC CODE:
-        // This is insecure for production but essential for debugging.
-        // It sends the real error message back to the client.
-        const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred.';
-        return new Response(JSON.stringify({ error: errorMessage }), { 
-            status: 500,
-            headers: { 'Content-Type': 'application/json' }
+        // Stream the response from the proxy directly to the client.
+        return new Response(proxyResponse.body, { 
+            headers: { 'Content-Type': 'text/plain' } 
         });
+
+    } catch (err) {
+        const message = err instanceof Error ? err.message : 'An unknown error occurred.';
+        console.error('API Endpoint Error:', message);
+        throw error(500, `API Error: ${message}`);
     }
 };
