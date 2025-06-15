@@ -29,6 +29,7 @@
     "vite": "^5.3.3"
   },
   "dependencies": {
-    "@microsoft/fetch-event-source": "^2.0.1"
+    "@microsoft/fetch-event-source": "^2.0.1",
+    "svelte-dnd-action": "^0.9.61"
   }
 }
