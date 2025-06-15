@@ -8,11 +8,26 @@ export const POST: RequestHandler = async ({ request }) => {
 		const systemInstruction = `Your current persona is '${persona}'. Respond in that distinct style, befitting your name and role.`;
 		const finalPrompt = `${systemInstruction}\n\nUser Question: "${prompt}"`;
 
+		// CORRECTED: Using the streaming endpoint with the required `alt=sse` parameter.
+		// This tells the API to format the response as Server-Sent Events.
 		const proxyApiUrl =
-			'https://key.ematthew477.workers.dev/v1beta/models/gemini-2.5-flash-preview-05-20:streamGenerateContent';
+			'https://key.ematthew477.workers.dev/v1beta/models/gemini-2.5-flash-preview-05-20:streamGenerateContent?alt=sse';
 
 		const apiRequestBody = {
-			contents: [{ parts: [{ text: finalPrompt }] }]
+			contents: [{ parts: [{ text: finalPrompt }] }],
+			generationConfig: {
+				temperature: 0.9,
+				topK: 1,
+				topP: 1,
+				maxOutputTokens: 2048,
+				stopSequences: []
+			},
+			safetySettings: [
+				{ category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_MEDIUM_AND_ABOVE' },
+				{ category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_MEDIUM_AND_ABOVE' },
+				{ category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_MEDIUM_AND_ABOVE' },
+				{ category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_MEDIUM_AND_ABOVE' }
+			]
 		};
 
 		const proxyResponse = await fetch(proxyApiUrl, {
@@ -30,37 +45,33 @@ export const POST: RequestHandler = async ({ request }) => {
 			throw new Error('Proxy response has no body.');
 		}
 
-		// CORRECTED IMPLEMENTATION: Manually pipe the stream.
-		// This is more robust in serverless environments than just passing the body.
+		// Using the robust stream-pumping logic from Protocol AEGIS.
 		const reader = proxyResponse.body.getReader();
 		const stream = new ReadableStream({
 			async start(controller) {
-				// This function will pump data from the proxy to the client.
 				try {
 					while (true) {
 						const { done, value } = await reader.read();
 						if (done) {
-							break; // Exit the loop when the stream is finished.
+							break;
 						}
-						// SERVER-SIDE LOG: Check your Cloudflare deployment logs for this message.
-						console.log('Chunk received from proxy, enqueuing to client.');
-						controller.enqueue(value); // Send the chunk to the client.
+						controller.enqueue(value);
 					}
 				} catch (err) {
 					console.error('Error while pumping stream:', err);
 					controller.error(err);
 				} finally {
-					controller.close(); // Close the stream when done.
+					controller.close();
 					reader.releaseLock();
 				}
 			}
 		});
 
-		// Return the response with our new, controlled stream.
+		// Return the SSE stream to the client.
 		return new Response(stream, {
-			headers: { 'Content-Type': 'text/plain; charset=utf-8' }
+			headers: { 'Content-Type': 'text/event-stream' } // Set correct content type for SSE
 		});
-		
+
 	} catch (err) {
 		const message = err instanceof Error ? err.message : 'An unknown error occurred.';
 		console.error('API Endpoint Error:', message);

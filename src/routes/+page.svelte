@@ -44,19 +44,12 @@
 			const reader = response.body.getReader();
 			const decoder = new TextDecoder();
 
+			// RESTORING eventsource-parser to handle the now-correct SSE stream
 			const onParse = (event: ParsedEvent | ReconnectInterval) => {
-				if (event.type === 'event') {
-					// DIAGNOSTIC: Log the raw data from the stream to the console.
-					// This allows us to inspect the true structure of the API response.
-					console.log('Raw API data chunk:', event.data);
-
-					if (event.data === '[DONE]') return;
-
+				if (event.type === 'event' && event.data) {
 					try {
+						// The 'data' field from an SSE stream is a JSON string.
 						const data = JSON.parse(event.data);
-						
-						// CORRECTED LOGIC: Iterate through the 'parts' array and join them.
-						// This is more robust than assuming only parts[0] exists.
 						const newText = data.candidates?.[0]?.content?.parts?.map((part: { text: string }) => part.text).join('') || '';
 
 						if (newText) {
@@ -65,11 +58,12 @@
 							scrollToBottom();
 						}
 					} catch (e) {
-						console.error('Error parsing stream data:', e);
+						// This will catch errors if a chunk is not valid JSON.
+						console.error('Error parsing stream data chunk:', e);
 					}
 				}
 			};
-
+			
 			const parser = createParser({ onParse });
 
 			while (true) {
