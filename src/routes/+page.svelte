@@ -6,7 +6,7 @@
   //-----------------------------------------------------------------------
   //  TOOLBAR & PERSONAS CONFIG
   //-----------------------------------------------------------------------
-  const tools = [
+  let tools = [
     { label: 'Code',    icon: '⚡', active: false, glow: '#60A5FA' },
     { label: 'Data',    icon: '📊', active: false, glow: '#34D399' },
     { label: 'Persona', icon: '🧬', active: false, glow: '#A78BFA' },
