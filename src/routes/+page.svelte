@@ -42,10 +42,7 @@
   //  SPRINGS (emotion + canvas p/z)
   //-----------------------------------------------------------------------
   const emotionalState = spring({ hue:220,saturation:30,lightness:50,energy:0.6,rhythm:1 },{ stiffness:0.05,damping:0.9});
-  let $emotionalState; // expose store value for style bindings
-
-  const canvasTransform = spring({ x:0,y:0,scale:1 },{ stiffness:0.05,damping:0.9});
-  let $canvasTransform;
+  
 
   //-----------------------------------------------------------------------
   //  HELPERS
