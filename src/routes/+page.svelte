@@ -1,9 +1,9 @@
 <script lang="ts">
-	import { onMount, tick } from 'svelte';
-	import { fly, scale, slide } from 'svelte/transition';
+	import { tick } from 'svelte';
+	import { fly } from 'svelte/transition';
 	import { createParser, type ParsedEvent, type ReconnectInterval } from 'eventsource-parser';
 
-	// --- Core State (Integrated Model) ---
+	// --- Core State ---
 	let messages: { id: number; type: 'user' | 'ai'; content: string; persona?: string }[] = [];
 	let inputText = '';
 	let currentPersona = 'Sage'; // Default persona
@@ -46,10 +46,19 @@
 
 			const onParse = (event: ParsedEvent | ReconnectInterval) => {
 				if (event.type === 'event') {
+					// DIAGNOSTIC: Log the raw data from the stream to the console.
+					// This allows us to inspect the true structure of the API response.
+					console.log('Raw API data chunk:', event.data);
+
 					if (event.data === '[DONE]') return;
+
 					try {
 						const data = JSON.parse(event.data);
-						const newText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+						
+						// CORRECTED LOGIC: Iterate through the 'parts' array and join them.
+						// This is more robust than assuming only parts[0] exists.
+						const newText = data.candidates?.[0]?.content?.parts?.map((part: { text: string }) => part.text).join('') || '';
+
 						if (newText) {
 							messages[messages.length - 1].content += newText;
 							messages = messages; // Trigger reactivity
@@ -61,10 +70,8 @@
 				}
 			};
 
-			// FINAL CORRECTION: The onParse function is now correctly passed inside an object.
 			const parser = createParser({ onParse });
 
-			// Read the stream until it's finished
 			while (true) {
 				const { done, value } = await reader.read();
 				if (done) break;
@@ -99,9 +106,6 @@
 	:global(.dark) .glass {
 		background: rgba(15, 15, 15, 0.7);
 	}
-	* {
-		transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-	}
 </style>
 
 <main class="min-h-screen bg-slate-100 dark:bg-slate-900 text-slate-900 dark:text-slate-100 flex flex-col">
@@ -111,7 +115,7 @@
 		</div>
 	</header>
 
-	<div class="flex-grow w-full max-w-4xl mx-auto p-4 sm:p-6 space-y-6 overflow-y-auto">
+	<div class="flex-grow w-full max-w-4xl mx-auto p-4 sm:p-6 space-y-6">
 		{#each messages as message (message.id)}
 			<div in:fly={{ y: 20, duration: 300 }}>
 				{#if message.type === 'user'}
@@ -144,33 +148,6 @@
 				>
 					<span class="text-2xl">{personas.find((p) => p.name === currentPersona)?.icon}</span>
 				</button>
-
-				{#if showPersonaMenu}
-					<div
-						class="absolute bottom-full left-0 mb-2 bg-white dark:bg-slate-900 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-700 overflow-hidden"
-						transition:scale={{ duration: 150 }}
-					>
-						{#each personas as persona}
-							<button
-								type="button"
-								on:click={() => {
-									currentPersona = persona.name;
-									showPersonaMenu = false;
-								}}
-								class="flex items-center gap-3 w-full px-4 py-3 text-left hover:bg-slate-100 dark:hover:bg-slate-800 {currentPersona ===
-								persona.name
-									? 'bg-slate-100 dark:bg-slate-800'
-									: ''}"
-							>
-								<span class="text-2xl">{persona.icon}</span>
-								<div>
-									<p class="font-medium text-slate-800 dark:text-slate-200">{persona.name}</p>
-									<p class="text-xs text-slate-500">{persona.description}</p>
-								</div>
-							</button>
-						{/each}
-					</div>
-				{/if}
 			</div>
 			<input
 				type="text"
@@ -182,7 +159,7 @@
 			<button
 				type="submit"
 				disabled={isThinking || !inputText.trim()}
-				class="bg-cyan-500 text-white font-bold py-3 px-5 rounded-lg hover:bg-cyan-600 disabled:bg-slate-500 disabled:cursor-not-allowed transition-colors"
+				class="bg-cyan-500 text-white font-bold py-3 px-5 rounded-lg hover:bg-cyan-600 disabled:bg-slate-500 disabled:cursor-not-allowed"
 			>
 				Send
 			</button>
