@@ -1,197 +1,156 @@
 <script lang="ts">
-	import { onMount, tick } from 'svelte';
-	import { fly, scale, slide } from 'svelte/transition';
-	import { fetchEventSource } from '@microsoft/fetch-event-source';
-	import { dndzone } from 'svelte-dnd-action';
+  import { onMount, tick } from 'svelte';
+  // -------------------------------------------------------------------------
+  //  TYPES & INITIAL STATE
+  // -------------------------------------------------------------------------
+  type Format = 'Chat' | 'Table' | 'Graph' | 'Code' | 'Story';
 
-	// --- Core State for Canvas Nodes ---
-	interface MessageNode {
-		id: number;
-		type: 'user' | 'ai';
-		content: string;
-		persona?: string;
-		position: { x: number; y: number };
-		zIndex: number;
-        selected: boolean;
-        outputMode: 'chat' | 'table' | 'json';
-	}
+  interface Persona {
+    id: string;
+    name: string;
+    icon: string;
+    mood: string;            // short tone tag (e.g. "Calm analytic")
+    description: string;     // longer tool‑tip / hover description
+  }
 
-	let messages: MessageNode[] = [];
-	let inputText = '';
-	let currentPersona = 'Sage';
-	let isThinking = false;
-	let showPersonaMenu = false;
-    let zIndexCounter = 10;
-    let activeTool = ''; // For sidebar simulation
-    let emotionColor = 'transparent'; // For emotion mirror simulation
+  interface Message {
+    id: number;
+    role: 'user' | 'assistant';
+    content: string;
+    format: Format;
+    persona: string;   // persona.id that generated this message
+    created: Date;
+  }
 
-	const personas = [
-		{ id: 'sage', name: 'Sage', icon: '🧘' },
-		{ id: 'architect', name: 'Architect', icon: '🏛️' },
-		{ id: 'poet', name: 'Poet', icon: '🎭' }
-	];
-    const tools = ['Code', 'Web', 'Data', 'Memory'];
+  const personas: Persona[] = [
+    { id: 'sage',      name: 'Sage',      icon: '🧘', mood: 'Calm',    description: 'Balanced wisdom & reflection.' },
+    { id: 'architect', name: 'Architect', icon: '🏛️', mood: 'System', description: 'Structured, precise systems thinker.' },
+    { id: 'poet',      name: 'Poet',      icon: '🎭', mood: 'Evoc.',  description: 'Creative & metaphor‑rich storyteller.' },
+    { id: 'analyst',   name: 'Analyst',   icon: '📈', mood: 'Data',   description: 'Evidence‑driven analyst.' }
+  ];
 
-	// --- SIMULATION: Keyword-based sentiment analysis for Emotion Mirror ---
-    function analyzeEmotion(text: string) {
-        const lowerText = text.toLowerCase();
-        if (lowerText.includes('error') || lowerText.includes('fail') || lowerText.includes('wrong')) {
-            emotionColor = 'rgba(239, 68, 68, 0.5)'; // Red
-        } else if (lowerText.includes('idea') || lowerText.includes('create') || lowerText.includes('design')) {
-            emotionColor = 'rgba(168, 85, 247, 0.5)'; // Purple
-        } else {
-            emotionColor = 'rgba(59, 130, 246, 0.5)'; // Blue
-        }
-        setTimeout(() => emotionColor = 'transparent', 1500);
-    }
+  // reactive state
+  let currentPersona: Persona = personas[0];
+  let outputFormat: Format   = 'Chat';
+  let draft                  = '';
+  let inputFocused           = false;
+  let messages: Message[]    = [];
 
-	// --- DND Handlers for Canvas Positioning ---
-	function handleDndFinalize(e: CustomEvent) {
-		const { items, info } = e.detail;
-        const targetItem = info.items[0];
-        const targetIndex = messages.findIndex(m => m.id === targetItem.id);
-        if (targetIndex > -1) {
-            messages[targetIndex].position.x += info.xOffset;
-            messages[targetIndex].position.y += info.yOffset;
-            messages[targetIndex].zIndex = ++zIndexCounter;
-        }
-		messages = items;
-	}
+  // -------------------------------------------------------------------------
+  //  HANDLERS
+  // -------------------------------------------------------------------------
+  function send() {
+    if (!draft.trim()) return;
 
-	// --- Backend Connection & Compositional Logic ---
-	async function handleSubmit() {
-		if (!inputText.trim() || isThinking) return;
-		isThinking = true;
-        analyzeEmotion(inputText); // Simulate emotion analysis on submit
+    // push user message
+    messages = [
+      ...messages,
+      { id: Date.now(), role: 'user', content: draft, format: outputFormat, persona: 'user', created: new Date() }
+    ];
 
-        // Check for slash commands (simulation)
-        if (inputText.startsWith('/')) {
-            // In a real implementation, this would trigger a specific tool
-            activeTool = 'Code'; // Simulate using the code tool
-        } else {
-            activeTool = 'Memory'; // Default to memory tool
-        }
+    // placeholder assistant message for streaming UX
+    const placeholderId = Date.now() + 1;
+    messages = [
+      ...messages,
+      { id: placeholderId, role: 'assistant', content: '', format: outputFormat, persona: currentPersona.id, created: new Date() }
+    ];
 
-        const selectedMessages = messages.filter(m => m.selected);
-        let userMessageContent = inputText;
-        let promptContext = "Compose the following inputs into a cohesive response:\n\n";
+    const userPrompt = draft;
+    draft = '';
 
-        if (selectedMessages.length > 0) {
-            selectedMessages.forEach(m => {
-                promptContext += `--- Input from Node ${m.id} ---\n${m.content}\n\n`;
-            });
-            userMessageContent = `${promptContext}--- New Instruction ---\n${inputText}`;
-            // Deselect nodes after composition
-            messages = messages.map(m => ({...m, selected: false}));
-        }
+    // TODO: connect to backend / stream API
+    // Example: fetch('/api/chat', { ... })
+  }
 
-		const activePersona = currentPersona;
-		messages = [...messages, { id: Date.now(), type: 'user', content: inputText, position: {x: 300, y: messages.length * 80}, zIndex: ++zIndexCounter, selected: false, outputMode: 'chat' }];
-		inputText = '';
-		await tick();
+  function choosePersona(p: Persona) {
+    currentPersona = p;
+  }
 
-		const aiMessageIndex = messages.length;
-		messages = [...messages, { id: Date.now() + 1, type: 'ai', content: '', persona: activePersona, position: {x: 300, y: messages.length * 80 + 50}, zIndex: ++zIndexCounter, selected: false, outputMode: 'chat' }];
-		
-		// Streaming logic with fetchEventSource remains the same...
-		try {
-			await fetchEventSource('/api/chat', {
-                method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ prompt: userMessageContent, persona: activePersona })
-                // ... onopen, onmessage, etc.
-            });
-		} catch (error) { /* ... */ } 
-        finally { 
-            isThinking = false;
-            activeTool = ''; // Reset tool simulation
-        }
-	}
+  function chooseFormat(f: Format) {
+    outputFormat = f;
+  }
 
-    function toggleNodeSelection(id: number) {
-        const msgIndex = messages.findIndex(m => m.id === id);
-        if (msgIndex > -1) {
-            messages[msgIndex].selected = !messages[msgIndex].selected;
-        }
-    }
+  async function scrollToBottom() {
+    await tick();
+    document.getElementById('chat-end')?.scrollIntoView({ behavior: 'smooth' });
+  }
+  $: scrollToBottom();
 </script>
 
 <style>
-  /* Contains all advanced styling from developer mockup + new styles for canvas features */
-  .emotion-mirror {
-    position: fixed;
-    top: 0; left: 0; right: 0; bottom: 0;
-    pointer-events: none;
-    z-index: 9999;
-    box-shadow: inset 0 0 12px 4px var(--emotion-color, transparent);
-    transition: box-shadow 0.5s ease-out;
-  }
-  .node {
-    position: absolute;
-    width: 450px;
-    border: 1px solid;
-    /* ... etc ... */
-  }
-  .node.selected {
-    border-color: #3b82f6; /* Blue-500 */
-    box-shadow: 0 0 15px rgba(59, 130, 246, 0.5);
-  }
+  :global(html) { @apply bg-slate-950; }
+  .glass         { @apply bg-slate-800/60 backdrop-blur-md rounded-2xl shadow-2xl shadow-black/40; }
+  .btn           { @apply px-3 py-1.5 rounded-lg border border-slate-600/60 hover:bg-slate-700/40 transition-colors; }
+  .btn-active    { @apply bg-slate-600/80 text-slate-100; }
 </style>
 
-<div class="emotion-mirror" style="--emotion-color: {emotionColor};"></div>
-<main class="h-screen w-screen bg-slate-100 dark:bg-slate-900 text-slate-900 dark:text-slate-100 flex font-sans overflow-hidden">
-  
-  <aside class="w-16 bg-white/50 dark:bg-slate-800/50 border-r border-slate-200 dark:border-slate-800 flex flex-col items-center py-4 space-y-4">
-    {#each tools as tool}
-      <button class="p-2 rounded-lg {activeTool === tool ? 'bg-cyan-500 text-white' : 'hover:bg-slate-200 dark:hover:bg-slate-700'}">
-        <div class="w-6 h-6">{tool.substring(0,2)}</div>
+<div class="h-screen w-screen flex text-slate-100 select-none">
+  <!-- LEFT TOOLBAR -------------------------------------------------------- -->
+  <nav class="w-16 sm:w-20 shrink-0 flex flex-col items-center py-6 gap-6 border-r border-slate-700/60">
+    {#each [
+      { label: 'Code',    icon: '</>' },
+      { label: 'Data',    icon: '📊'  },
+      { label: 'Persona', icon: '🧬'  },
+      { label: 'Memory',  icon: '🧠'  },
+      { label: 'Settings',icon: '⚙️'  }
+    ] as tool}
+      <button class="flex flex-col items-center gap-1 focus:outline-none">
+        <span class="text-xl">{tool.icon}</span>
+        <span class="text-[10px] sm:text-xs text-slate-400">{tool.label}</span>
       </button>
     {/each}
-  </aside>
+  </nav>
 
-  <div class="flex-1 flex flex-col">
-    <header class="flex-shrink-0 z-20 border-b border-slate-200 dark:border-slate-800">
-        <h1 class="text-xl p-4 font-semibold tracking-wide">Vanguard Canvas</h1>
+  <!-- MAIN CANVAS -------------------------------------------------------- -->
+  <section class="flex-1 flex flex-col px-4 py-6 overflow-hidden">
+    <!-- Top Persona Switcher --------------------------------------------- -->
+    <header class="flex justify-end items-center gap-2 mb-4">
+      {#each personas as p}
+        <button
+          class="btn {currentPersona.id === p.id ? 'btn-active' : ''} flex items-center gap-1"
+          on:click={() => choosePersona(p)}
+          title={p.description}
+        >
+          <span>{p.icon}</span>
+          <span class="hidden sm:inline">{p.name}</span>
+        </button>
+      {/each}
     </header>
 
-    <div class="flex-grow relative">
-        <section use:dndzone={{ items: messages }} on:consider on:finalize={handleDndFinalize}>
-            {#each messages as message (message.id)}
-                <div 
-                    class="node {message.selected ? 'selected' : ''}" 
-                    style="left: {message.position.x}px; top: {message.position.y}px; z-index: {message.zIndex};"
-                    on:mousedown={() => message.zIndex = ++zIndexCounter}
-                >
-                    <div class="node-header flex justify-between items-center" on:click={() => toggleNodeSelection(message.id)}>
-                        </div>
-                    
-                    {#if message.type === 'ai'}
-                        <div class="output-mode-switcher flex border-b border-slate-200 dark:border-slate-700">
-                            <button on:click={() => message.outputMode = 'chat'} class="{message.outputMode === 'chat' ? 'bg-slate-200 dark:bg-slate-700' : ''} px-3 py-1 text-sm">Chat</button>
-                            <button on:click={() => message.outputMode = 'table'} class="{message.outputMode === 'table' ? 'bg-slate-200 dark:bg-slate-700' : ''} px-3 py-1 text-sm">Table</button>
-                            <button on:click={() => message.outputMode = 'json'} class="{message.outputMode === 'json' ? 'bg-slate-200 dark:bg-slate-700' : ''} px-3 py-1 text-sm">JSON</button>
-                        </div>
-                    {/if}
-
-                    <div class="p-4">
-                        {#if message.outputMode === 'chat'}
-                            <p class="whitespace-pre-wrap">{message.content}</p>
-                        {:else if message.outputMode === 'table'}
-                            <p class="text-xs text-slate-500">[This is a simulated table view]</p>
-                            <table class="w-full mt-2 text-sm">...</table>
-                        {:else if message.outputMode === 'json'}
-                            <p class="text-xs text-slate-500">[This is a simulated JSON view]</p>
-                            <pre class="bg-slate-100 dark:bg-slate-900 p-2 rounded mt-2"><code>{JSON.stringify({ simulated: true, value: "Example" }, null, 2)}</code></pre>
-                        {/if}
-                    </div>
-                </div>
-            {/each}
-        </section>
+    <!-- Conversation Thread --------------------------------------------- -->
+    <div class="flex-1 overflow-y-auto pr-2 space-y-6">
+      {#each messages as m}
+        <div class="max-w-xl" class:ml-auto={m.role === 'user'}>
+          <div class="glass p-4 leading-relaxed break-words">
+            <div class="mb-1 text-sm text-slate-400" >{m.role === 'assistant' ? personas.find(x => x.id === m.persona)?.icon : '🙋'}
+              {m.role === 'assistant' ? personas.find(x => x.id === m.persona)?.name : 'You'}</div>
+            {m.content || '…'}
+          </div>
+        </div>
+      {/each}
+      <div id="chat-end" class="h-4"></div>
     </div>
 
-    <div class="flex-shrink-0 p-4 border-t border-slate-200 dark:border-slate-800">
-        <form on:submit|preventDefault={handleSubmit} class="max-w-4xl mx-auto">
-            </form>
-    </div>
-  </div>
-</main>
+    <!-- Output format picker --------------------------------------------- -->
+    {#if inputFocused || draft.length > 0}
+      <div class="flex gap-2 justify-center mt-2 mb-1 text-sm">
+        {#each ['Chat','Table','Graph','Code','Story'] as f}
+          <button class="btn {outputFormat === f ? 'btn-active' : ''}" on:click={() => chooseFormat(f)}>{f}</button>
+        {/each}
+      </div>
+    {/if}
+
+    <!-- Input Zone ------------------------------------------------------- -->
+    <form class="mt-auto flex items-end gap-3 py-4" on:submit|preventDefault={send}>
+      <textarea
+        bind:value={draft}
+        rows={inputFocused ? 3 : 1}
+        placeholder="Enter a message…"
+        class="flex-1 resize-none bg-slate-700/40 rounded-xl p-3 focus:ring-2 focus:ring-cyan-400/70 outline-none placeholder:text-slate-400"
+        on:focus={() => inputFocused = true}
+        on:blur={() => inputFocused = false}
+      ></textarea>
+      <button type="submit" class="w-12 h-12 rounded-xl bg-gradient-to-br from-cyan-500 to-blue-600 hover:brightness-110 flex items-center justify-center shadow-lg">→</button>
+    </form>
+  </section>
+</div>
