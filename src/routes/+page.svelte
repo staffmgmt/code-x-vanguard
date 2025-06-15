@@ -19,16 +19,18 @@
 	async function handleSubmit() {
 		if (!inputText.trim() || isThinking) return;
 
-		isThinking = true;
 		const userMessageContent = inputText;
 		const activePersona = currentPersona;
-
-		messages = [...messages, { id: Date.now(), type: 'user', content: userMessageContent }];
 		inputText = '';
-		await scrollToBottom();
+		isThinking = true;
 
+		// Add user message
+		messages = [...messages, { id: Date.now(), type: 'user', content: userMessageContent }];
+		
+		// Add AI placeholder
 		messages = [...messages, { id: Date.now() + 1, type: 'ai', content: '', persona: activePersona }];
-
+		await scrollToBottom();
+		
 		try {
 			const response = await fetch('/api/chat', {
 				method: 'POST',
@@ -38,27 +40,22 @@
 
 			if (!response.ok || !response.body) {
 				const errorText = await response.text();
-				throw new Error(`API Error: ${response.status} ${response.statusText} - ${errorText}`);
+				throw new Error(errorText || `API Error: ${response.status}`);
 			}
 
 			const reader = response.body.getReader();
 			const decoder = new TextDecoder();
-
-			// RESTORING eventsource-parser to handle the now-correct SSE stream
 			const onParse = (event: ParsedEvent | ReconnectInterval) => {
 				if (event.type === 'event' && event.data) {
 					try {
-						// The 'data' field from an SSE stream is a JSON string.
 						const data = JSON.parse(event.data);
-						const newText = data.candidates?.[0]?.content?.parts?.map((part: { text: string }) => part.text).join('') || '';
-
+						const newText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
 						if (newText) {
 							messages[messages.length - 1].content += newText;
 							messages = messages; // Trigger reactivity
 							scrollToBottom();
 						}
 					} catch (e) {
-						// This will catch errors if a chunk is not valid JSON.
 						console.error('Error parsing stream data chunk:', e);
 					}
 				}
@@ -69,22 +66,28 @@
 			while (true) {
 				const { done, value } = await reader.read();
 				if (done) break;
-				const chunk = decoder.decode(value);
-				parser.feed(chunk);
+				parser.feed(decoder.decode(value));
 			}
-		} catch (error) {
-			console.error('Failed to fetch stream:', error);
-			const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred.';
-			messages[messages.length - 1].content = `Error: Could not get a response. ${errorMessage}`;
+
+		} catch (err) {
+			const message = err instanceof Error ? err.message : 'An unknown error occurred.';
+			console.error('Submit handler failed:', message);
+			messages[messages.length - 1].content = `Error: Could not get a response. ${message}`;
+
 		} finally {
+			// This ensures the UI is always responsive after a request finishes or fails.
 			isThinking = false;
+			messages = messages; // Final reactivity trigger
+			await scrollToBottom();
 		}
 	}
 
 	async function scrollToBottom() {
 		await tick();
 		const element = document.scrollingElement || document.documentElement;
-		element.scrollTop = element.scrollHeight;
+		if (element) {
+			element.scrollTop = element.scrollHeight;
+		}
 	}
 </script>
 
@@ -124,7 +127,7 @@
 							{personas.find((p) => p.name === message.persona)?.icon || '🤖'}
 						</div>
 						<div class="bg-white dark:bg-slate-800 p-4 rounded-xl max-w-lg">
-							<p class="whitespace-pre-wrap">{message.content}{isThinking && messages[messages.length - 1] === message ? '...' : ''}</p>
+							<p class="whitespace-pre-wrap">{message.content}{isThinking && messages[messages.length - 1].id === message.id ? '...' : ''}</p>
 						</div>
 					</div>
 				{/if}
