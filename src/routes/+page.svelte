@@ -1,7 +1,7 @@
 <script lang="ts">
     import { onMount, tick } from 'svelte';
     import { fly, scale, slide } from 'svelte/transition';
-    import { createParser } from 'eventsource-parser';
+    import { createParser, type ParsedEvent, type ReconnectInterval } from 'eventsource-parser';
 
     // --- Core State (Integrated Model) ---
     let messages: { id: number; type: 'user' | 'ai'; content: string; persona?: string }[] = [];
@@ -44,7 +44,8 @@
             const reader = response.body.getReader();
             const decoder = new TextDecoder();
             
-            const parser = createParser((event) => {
+            // CORRECTED: The onParse callback is now correctly passed inside an object.
+            const onParse = (event: ParsedEvent | ReconnectInterval) => {
                 if (event.type === 'event') {
                     if (event.data === '[DONE]') return;
                     try {
@@ -59,8 +60,11 @@
                         console.error('Error parsing stream data:', e);
                     }
                 }
-            });
+            };
+            
+            const parser = createParser(onParse);
 
+            // Read the stream until it's finished
             while (true) {
                 const { done, value } = await reader.read();
                 if (done) break;
@@ -70,7 +74,8 @@
 
         } catch (error) {
             console.error('Failed to fetch stream:', error);
-            messages[messages.length - 1].content = `Error: Could not get a response. ${error instanceof Error ? error.message : ''}`;
+            const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred.';
+            messages[messages.length - 1].content = `Error: Could not get a response. ${errorMessage}`;
         } finally {
             isThinking = false;
         }
