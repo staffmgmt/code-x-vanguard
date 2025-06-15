@@ -1,312 +1,186 @@
 <script lang="ts">
+  /* -----------------------------------------------------------
+     Vanguard Canvas – Elite UX Revamp
+     -----------------------------------------------------------*/
   import { onMount, tick } from 'svelte';
-import { spring } from 'svelte/motion';
-import { fetchEventSource } from '@microsoft/fetch-event-source';
+  import { spring } from 'svelte/motion';
+  import { fetchEventSource } from '@microsoft/fetch-event-source';
 
-  //-----------------------------------------------------------------------
-  //  TOOLBAR & PERSONAS CONFIG
-  //-----------------------------------------------------------------------
+  /* ------------------------------------------------------------------
+     TOOL CONFIGURATION & PERSONAS
+     ------------------------------------------------------------------*/
   let tools = [
-    { label: 'Code',    icon: '⚡', active: false, glow: '#60A5FA' },
-    { label: 'Data',    icon: '📊', active: false, glow: '#34D399' },
-    { label: 'Persona', icon: '🧬', active: false, glow: '#A78BFA' },
-    { label: 'Memory',  icon: '🧠', active: false, glow: '#F472B6' },
-    { label: 'Settings',icon: '⚙️', active: false, glow: '#94A3B8' }
+    { label: 'Code',    icon: 'lucide:code',   active:false, glow:'#60A5FA' },
+    { label: 'Data',    icon: 'lucide:bar-chart-4',active:false, glow:'#34D399' },
+    { label: 'Persona', icon: 'lucide:user-cog',active:false, glow:'#A78BFA' },
+    { label: 'Memory',  icon: 'lucide:brain', active:false, glow:'#F472B6' },
+    { label: 'Settings',icon: 'lucide:settings',active:false, glow:'#94A3B8' }
   ];
 
-  interface Persona {
-    id: string; name: string; icon: string; description: string; color: string;
-  }
-  const personas: Persona[] = [
-    { id:'sage',   name:'Sage',   icon:'🌊', description:'Thoughtful & nuanced',  color:'#3B82F6' },
-    { id:'gpt',    name:'GPT',    icon:'⚡', description:'Direct & efficient',    color:'#10B981' },
-    { id:'poet',   name:'Poet',   icon:'🎨', description:'Imaginative & bold',   color:'#8B5CF6' }
+  interface Persona { id:string; name:string; icon:string; desc:string; color:string; }
+  const personas:Persona[] = [
+    { id:'sage', name:'Sage', icon:'🧘',  desc:'Balanced wisdom',     color:'#3B82F6' },
+    { id:'gpt',  name:'GPT',  icon:'⚡',  desc:'Direct & efficient',  color:'#10B981' },
+    { id:'poet', name:'Poet', icon:'🎨', desc:'Creative & bold',     color:'#8B5CF6' }
   ];
 
-  //-----------------------------------------------------------------------
-  //  REACTIVE STATE STORES
-  //-----------------------------------------------------------------------
+  /* ------------------------------------------------------------------
+     STATE & SPRINGS
+     ------------------------------------------------------------------*/
   type Format = 'Chat'|'Table'|'Graph'|'Code'|'Story';
   interface Msg { id:number; role:'user'|'assistant'; content:string; persona:string; format:Format; streaming:boolean; created:Date }
 
-  let messages: Msg[] = [];
-  let draft       = '';
-  let inputFocused= false;
-  let currentFormat:Format = 'Chat';
+  let messages:Msg[] = [];
+  let draft = '';
   let currentPersona = 'sage';
-  let workspaceMode  = 'focus';      // focus | dashboard | flow
-  let inputMode      = 'text';       // text | code | data | mindmap
-  let commandMode    = false;
+  let currentFormat:Format = 'Chat';
+  let inputFocused=false; let commandMode=false;
+  let workspaceMode:'focus'|'dashboard'|'flow' = 'focus';
 
-  //-----------------------------------------------------------------------
-  //  SPRINGS (emotion + canvas p/z)
-  //-----------------------------------------------------------------------
-  const emotionalState = spring({ hue:220,saturation:30,lightness:50,energy:0.6,rhythm:1 },{ stiffness:0.05,damping:0.9});
-  const canvasTransform = spring({ x:0,y:0,scale:1 },{ stiffness:0.05,damping:0.9});
-  
+  const emotion = spring({h:220,s:25,l:15,e:.4,r:1},{stiffness:.05,damping:.9});
+  const canvas = spring({x:0,y:0,scale:1},{stiffness:.05,damping:.9});
 
-  //-----------------------------------------------------------------------
-  //  HELPERS
-  //-----------------------------------------------------------------------
-  function analyzeEmotion(text:string){
-    const exclam = (text.match(/!/g)||[]).length;
-    const questions = (text.match(/\?/g)||[]).length;
-    const energy = Math.min(1,text.length/200) + exclam*0.05;
-    let hue=220,sat=25,rhythm=1;
-    if(exclam>2){ hue=0; sat=60; rhythm=1.4; }
-    else if(questions>1){ hue=280; sat=45; rhythm=0.8; }
-    emotionalState.set({ hue,saturation:sat,lightness:50,energy,rhythm });
-  }
+  /* ------------------------------------------------------------------
+     HELPERS
+     ------------------------------------------------------------------*/
+  function pushMsg(m:Msg){ messages=[...messages,m]; tick().then(scrollBottom); }
+  function scrollBottom(){ document.getElementById('chat-end')?.scrollIntoView({behavior:'smooth'}); }
 
-  function choosePersona(p:Persona){
-    currentPersona=p.id;
-    emotionalState.update(s=>({...s,hue:parseInt(p.color.slice(1,3),16)}));
-  }
+  function choosePersona(p:Persona){ currentPersona=p.id; emotion.update(s=>({...s,h:parseInt(p.color.slice(1,3),16)})); }
 
-  function detectInputIntent(text:string){
-    if(text.startsWith('```')||text.includes('function')) inputMode='code';
-    else if(text.includes('table')||text.includes('data')){ inputMode='data'; currentFormat='Table'; }
-    else if(text.length>120) inputMode='mindmap';
-    else inputMode='text';
-  }
-
-  //-----------------------------------------------------------------------
-  //  STREAMING SEND LOGIC (Microsoft fetch-event-source)
-  //-----------------------------------------------------------------------
+  /* ------------------------------------------------------------------
+     STREAMING SEND
+     ------------------------------------------------------------------*/
   async function send(){
     if(!draft.trim()) return;
-    const userMsg:Msg = { id:Date.now(), role:'user', content:draft, persona:'user', format:currentFormat, streaming:false, created:new Date() };
-    messages=[...messages,userMsg];
+    const user:Msg={id:Date.now(),role:'user',content:draft,persona:'user',format:currentFormat,streaming:false,created:new Date()};
+    pushMsg(user);
 
-    const placeholderId = Date.now()+1;
-    messages=[...messages,{ id:placeholderId, role:'assistant', content:'', persona:currentPersona, format:currentFormat, streaming:true, created:new Date() }];
+    const ghostId=Date.now()+1;
+    pushMsg({id:ghostId,role:'assistant',content:'',persona:currentPersona,format:currentFormat,streaming:true,created:new Date()});
 
-    const prompt = draft;
-    draft='';
+    const prompt=draft; draft='';
     try{
       await fetchEventSource('/api/chat',{
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({ prompt, persona:currentPersona, format:currentFormat }),
-        async onmessage(msg:EventSourceMessage){
-          if(!msg.data) return;
-          try{ const chunk=JSON.parse(msg.data);
-            const delta=chunk.candidates?.[0]?.content?.parts?.[0]?.text||'';
-            if(delta){
-              const idx=messages.findIndex(m=>m.id===placeholderId);
-              if(idx!==-1){ messages[idx].content+=delta; messages=[...messages]; }
-            }
-          }catch(e){ console.error('chunk parse',e); }
+        method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({prompt,persona:currentPersona,format:currentFormat}),
+        onmessage(ev){ if(!ev.data) return; try{ const d=JSON.parse(ev.data); const t=d.candidates?.[0]?.content?.parts?.[0]?.text||''; if(t){ const i=messages.findIndex(m=>m.id===ghostId); if(i>-1){ messages[i].content+=t; messages=[...messages]; } } }catch{}
         },
-        onclose(){
-          const idx=messages.findIndex(m=>m.id===placeholderId);
-          if(idx!==-1){ messages[idx].streaming=false; messages=[...messages]; }
-        },
-        onerror(err){ throw err; }
+        onclose(){ const i=messages.findIndex(m=>m.id===ghostId); if(i>-1){ messages[i].streaming=false; messages=[...messages]; } },
+        onerror(err){ throw err }
       });
-    }catch(e){
-      const idx=messages.findIndex(m=>m.id===placeholderId);
-      if(idx!==-1){ messages[idx].streaming=false; messages[idx].content=`⚠️ ${(e as Error).message}`; messages=[...messages]; }
-    }
+    }catch(err){ const i=messages.findIndex(m=>m.id===ghostId); if(i>-1){ messages[i].streaming=false; messages[i].content='⚠️ '+(err as Error).message; messages=[...messages]; } }
   }
 
-  //-----------------------------------------------------------------------
-  //  INPUT & COMMAND HANDLING
-  //-----------------------------------------------------------------------
-  function handleKey(e:KeyboardEvent){
-    if(e.key==='/' && !draft) { commandMode=true; return; }
-    if(commandMode && e.key==='Enter'){
-      processCommand(draft.trim()); draft=''; commandMode=false; return; }
-    if(e.key==='Escape'){ commandMode=false; return; }
-  }
-
-  function processCommand(cmd:string){
-    const [c,...args]=cmd.slice(1).split(' ');
-    switch(c){
-      case 'mode': workspaceMode=args[0]||'focus'; break;
-      case 'clear': messages=[]; break;
-    }
-  }
-
-  //-----------------------------------------------------------------------
-  //  CANVAS WHEEL (zoom)
-  //-----------------------------------------------------------------------
-  function handleWheel(e:WheelEvent){
-    if(e.ctrlKey){ e.preventDefault(); const s=$canvasTransform.scale*(1-e.deltaY*0.001);
-      canvasTransform.update(t=>({...t,scale:Math.min(2,Math.max(0.5,s))})); }
-  }
-
-  //-----------------------------------------------------------------------
-  //  AUTO SCROLL
-  //-----------------------------------------------------------------------
-  async function scrollBottom(){ await tick(); document.getElementById('chat-end')?.scrollIntoView({behavior:'smooth'}); }
-  $: scrollBottom();
-
-  //-----------------------------------------------------------------------
-  onMount(()=> emotionalState.set({hue:220,saturation:30,lightness:50,energy:0.7,rhythm:1}));
+  /* ------------------------------------------------------------------
+     INITIAL DEMO CONTENT FOR VISUAL VALIDATION (can be removed)
+     ------------------------------------------------------------------*/
+  onMount(()=>{
+    pushMsg({id:1,role:'assistant',content:'Hello 👋  How can I assist you today?',persona:'sage',format:'Chat',streaming:false,created:new Date()});
+    pushMsg({id:2,role:'user',content:'Analyze this data and generate a report.',persona:'user',format:'Chat',streaming:false,created:new Date()});
+  });
 </script>
 
-<div class="vanguard" style="--emotion-h:{$emotionalState.hue}; --emotion-s:{$emotionalState.saturation}%; --emotion-l:{$emotionalState.lightness}%; --emotion-e:{$emotionalState.energy}; --emotion-r:{$emotionalState.rhythm};">
-  <div class="emotion-mirror"></div>
-  <aside class="tool-sidebar">
-    <div class="vanguard-logo"><div class="logo-pulse"></div><span>V</span></div>
-    <nav class="tool-stack">
-      {#each tools as t}
-        <button class="tool-module {t.active?'active':''}" style="--tool-glow:{t.glow}" on:click={()=>{t.active=!t.active;tools=[...tools]}}>
-          <span class="tool-icon">{t.icon}</span><span class="tool-label">{t.label}</span>{#if t.active}<div class="tool-aura"></div>{/if}
-        </button>
-      {/each}
-    </nav>
-    <div class="persona-selector">
-      {#each personas as p}
-        <button class="persona-chip {currentPersona===p.id?'active':''}" title={p.description} style="--persona-color:{p.color}" on:click={()=>choosePersona(p)}>{p.icon}</button>
-      {/each}
-    </div>
+<!-- --------------------------------  LAYOUT  -->
+<div class="vx-root" style="--eh:{$emotion.h};--es:{$emotion.s}%;--el:{$emotion.l}%;--ee:{$emotion.e};--er:{$emotion.r};">
+  <div class="vx-glow"></div>
+
+  <!-- SIDEBAR -->
+  <aside class="vx-sidebar">
+    <button class="vx-logo">V</button>
+    <nav>{#each tools as t}
+      <button class="vx-tool {t.active?'is-active':''}" style="--tool:{t.glow}" on:click={()=>{t.active=!t.active;tools=[...tools]}}>
+        <i data-lucide={t.icon}></i><span>{t.label}</span>
+      </button>{/each}</nav>
+    <div class="vx-personas">{#each personas as p}
+      <button class="vx-chip {currentPersona===p.id?'is-active':''}" style="--pcol:{p.color}" on:click={()=>choosePersona(p)}>{p.icon}</button>
+    {/each}</div>
   </aside>
 
-  <header class="top-controls">
-    <div class="workspace-modes">
-      <button class="mode-btn {workspaceMode==='focus'?'active':''}" on:click={()=>workspaceMode='focus'}>Focus</button>
-      <button class="mode-btn {workspaceMode==='dashboard'?'active':''}" on:click={()=>workspaceMode='dashboard'}>Dashboard</button>
-      <button class="mode-btn {workspaceMode==='flow'?'active':''}" on:click={()=>workspaceMode='flow'}>Flow</button>
-    </div>
+  <!-- HEADER -->
+  <header class="vx-header">
+    <div class="vx-modes">{#each ['focus','dashboard','flow'] as m}
+      <button class="vx-mode {workspaceMode===m?'is-active':''}" on:click={()=>workspaceMode=m}>{m[0].toUpperCase()+m.slice(1)}</button>
+    {/each}</div>
   </header>
 
-  <main class="adaptive-canvas {workspaceMode}" on:wheel={handleWheel} style="transform:translate({$canvasTransform.x}px,{$canvasTransform.y}px) scale({$canvasTransform.scale})">
+  <!-- CANVAS -->
+  <main class="vx-canvas {workspaceMode}" on:wheel={(e)=>{ if(e.ctrlKey){e.preventDefault();const s=$canvas.scale*(1-e.deltaY*0.001);canvas.update(c=>({...c,scale:Math.min(2,Math.max(.5,s))})); } }} style="transform:translate({$canvas.x}px,{$canvas.y}px) scale({$canvas.scale})">
     {#each messages as m,i}
-      {#if workspaceMode==='focus'}
-        <article class="message-block {m.role}" style="animation-delay:{i*50}ms">
-          <div class="message-avatar">{m.role==='assistant'?personas.find(x=>x.id===m.persona)?.icon:'🙋'}</div>
-          <div class="message-content"><header class="message-meta">{m.role==='assistant'?personas.find(x=>x.id===m.persona)?.name:'You'}</header><div class="message-body">{#if m.streaming}<div class="streaming-text">{m.content}<span class="cursor-blink">▊</span></div>{:else}{m.content}{/if}</div></div>
-        </article>
-      {:else if workspaceMode==='dashboard'}
-        <div class="dashboard-card"><div class="card-header"><span>{m.role==='assistant'?personas.find(x=>x.id===m.persona)?.name:'You'}</span></div><div class="card-content">{m.content.slice(0,150)}…</div></div>
-      {:else}
-        <div class="flow-node {m.role}" style="left:{100+(i%3)*300}px; top:{100+Math.floor(i/3)*200}px"><div class="node-header">{m.role==='assistant'?personas.find(x=>x.id===m.persona)?.icon:'🙋'}</div><div class="node-content">{m.content.slice(0,100)}…</div></div>
-      {/if}
+      <article class="vx-msg {m.role}" style="--d:{i*40}ms">
+        <div class="vx-ava">{m.role==='assistant'?personas.find(pp=>pp.id===m.persona)?.icon:'🙋'}</div>
+        <div class="vx-bubble">{#if m.streaming}{m.content}<span class="vx-cursor">▊</span>{:else}{m.content}{/if}</div>
+      </article>
     {/each}
     <div id="chat-end" style="height:4px"></div>
   </main>
 
-  <footer class="input-zone {inputMode}">
-    {#if commandMode}
-      <div class="command-palette"><span class="command-prefix">/</span><input bind:value={draft} placeholder="Enter command…" on:keydown={handleKey} autofocus/></div>
-    {:else}
-      {#if inputFocused||draft}
-        <div class="format-selector">
-          {#each ['Chat','Table','Graph','Code','Story'] as f}
-            <button class="format-chip {currentFormat===f?'active':''}" on:click={()=>currentFormat=f}>{f}</button>
-          {/each}
-        </div>
-      {/if}
-      <div class="input-container">
-        <textarea class="dynamic-input" bind:value={draft} placeholder="Begin with intent…" rows="1" on:keydown={handleKey} on:input={()=>{
-            analyzeEmotion(draft); detectInputIntent(draft);
-          }} on:focus={()=>inputFocused=true} on:blur={()=>inputFocused=false}></textarea>
-        <button class="send-button" on:click={send} disabled={!draft.trim()}>→</button>
-      </div>
-    {/if}
+  <!-- INPUT BAR -->
+  <footer class="vx-input">
+    <textarea bind:value={draft} placeholder="Begin with intent…" rows="1" on:keydown={(e)=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send();}}}></textarea>
+    <button class="vx-send" on:click={send} disabled={!draft.trim()}><i data-lucide="send"></i></button>
   </footer>
 </div>
 
 <style>
-  /* FULL AESTHETIC KIT */
-
+  /* -----------------------------------------------------------
+     Design Tokens – dark luxury palette
+     -----------------------------------------------------------*/
   :root{
-    --golden-ratio:1.618;
-    --spacing-xs:.25rem;
-    --spacing-sm:.5rem;
-    --spacing-md:1rem;
-    --spacing-lg:1.618rem;
-    --spacing-xl:2.618rem;
+    --bg-0:#0B0D10;--bg-1:#111318;--bg-glass:rgba(255,255,255,.04);
+    --stroke:rgba(255,255,255,.07); --radius:16px;
+    --text-1:#F1F5F9; --text-2:#94A3B8;
+    --shadow-lg:0 8px 24px -8px rgba(0,0,0,.6);
   }
+  *{box-sizing:border-box;padding:0;margin:0}
+  body,html{height:100%;background:var(--bg-0);font-family:"Inter",sans-serif;overflow:hidden;color:var(--text-1)}
 
-  *{box-sizing:border-box;}
-  body,html{margin:0;height:100%;background:#050505;overscroll-behavior:none;}
+  /* -------- Root grid */
+  .vx-root{display:grid;grid-template-columns:88px 1fr;grid-template-rows:64px 1fr 72px;height:100vh;position:relative;isolation:isolate}
 
-  .vanguard{display:grid;grid-template-columns:80px 1fr;grid-template-rows:60px 1fr auto;height:100vh;color:#e4e4e7;font-family:-apple-system,BlinkMacSystemFont,'Inter',sans-serif;position:relative}
+  /* -------- Ambient radial glow */
+  .vx-glow{position:absolute;inset:0;pointer-events:none;background:radial-gradient(circle at 50% 20%,hsla(var(--eh),var(--es),25%,calc(var(--ee)*.4)),transparent 70%);mix-blend-mode:screen;animation:glowPulse calc(6s/var(--er)) ease-in-out infinite}
+  @keyframes glowPulse{0%,100%{opacity:.5}50%{opacity:.8}}
 
-  /* -------------------------------- emotion mirror */
-  .emotion-mirror{position:absolute;inset:0;pointer-events:none;background:radial-gradient(circle at 50% 50%,hsla(var(--emotion-h),var(--emotion-s),var(--emotion-l),calc(var(--emotion-e) * 0.05)),transparent 70%);border:2px solid hsla(var(--emotion-h),var(--emotion-s),60%,calc(var(--emotion-e) * 0.1));animation:emotionPulse calc(4s/var(--emotion-r)) ease-in-out infinite;}
-  @keyframes emotionPulse{0%,100%{opacity:.3;transform:scale(1)}50%{opacity:.6;transform:scale(1.02)}}
+  /* -------- Sidebar */
+  .vx-sidebar{grid-row:1/span 3;background:var(--bg-1);backdrop-filter:blur(18px) saturate(160%);display:flex;flex-direction:column;align-items:center;padding:1rem 0;gap:1.125rem;border-right:1px solid var(--stroke)}
+  .vx-logo{width:48px;height:48px;border-radius:var(--radius);background:linear-gradient(135deg,#3B82F6,#8B5CF6);color:#fff;font-weight:700;font-size:1.25rem;border:none;cursor:pointer;box-shadow:var(--shadow-lg);transition:transform .25s}
+  .vx-logo:hover{transform:scale(1.08)}
+  nav{display:flex;flex-direction:column;gap:.75rem;margin-top:1rem}
+  .vx-tool{width:56px;height:56px;border-radius:var(--radius);border:1px solid var(--stroke);background:var(--bg-glass);display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--text-2);position:relative;cursor:pointer;transition:.25s}
+  .vx-tool i{width:20px;height:20px}
+  .vx-tool span{font-size:.625rem;margin-top:2px}
+  .vx-tool:is(:hover,.is-active){color:var(--text-1);background:rgba(255,255,255,.06);border-color:var(--tool);box-shadow:0 0 0 1px var(--tool),0 10px 20px -8px var(--tool)}
+  .vx-personas{margin-top:auto;display:flex;flex-direction:column;gap:.5rem}
+  .vx-chip{width:34px;height:34px;border-radius:50%;border:2px solid transparent;display:flex;align-items:center;justify-content:center;font-size:1rem;background:var(--bg-glass);cursor:pointer;transition:.3s}
+  .vx-chip:is(:hover,.is-active){transform:scale(1.12)}
+  .vx-chip.is-active{border-color:var(--pcol);box-shadow:0 0 0 2px var(--pcol),0 6px 16px -6px var(--pcol)}
 
-  /* -------------------------------- sidebar */
-  .tool-sidebar{grid-row:1/-1;background:rgba(0,0,0,.6);backdrop-filter:blur(20px) saturate(180%);border-right:1px solid rgba(255,255,255,.05);display:flex;flex-direction:column;padding:var(--spacing-md);gap:var(--spacing-lg);z-index:10}
-  .vanguard-logo{width:48px;height:48px;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#3B82F6,#8B5CF6);border-radius:12px;font-weight:700;font-size:1.5rem;position:relative;cursor:pointer;transition:transform .3s ease}
-  .vanguard-logo:hover{transform:scale(1.05)}
-  .logo-pulse{position:absolute;inset:-4px;background:inherit;border-radius:inherit;opacity:.3;filter:blur(8px);animation:logoPulse 2s ease-in-out infinite}
-  @keyframes logoPulse{0%,100%{transform:scale(1);opacity:.3}50%{transform:scale(1.1);opacity:.1}}
+  /* -------- Header */
+  .vx-header{grid-column:2;background:var(--bg-glass);backdrop-filter:blur(14px);display:flex;align-items:center;padding:0 1.375rem;border-bottom:1px solid var(--stroke)}
+  .vx-modes{display:flex;gap:.5rem}
+  .vx-mode{border:none;padding:.5rem 1rem;border-radius:var(--radius);background:transparent;color:var(--text-2);cursor:pointer}
+  .vx-mode:is(:hover,.is-active){background:rgba(255,255,255,.06);color:var(--text-1)}
 
-  .tool-stack{display:flex;flex-direction:column;gap:var(--spacing-sm)}
-  .tool-module{width:64px;height:64px;border:none;background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.05);border-radius:16px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;cursor:pointer;position:relative;transition:.3s cubic-bezier(.4,0,.2,1)}
-  .tool-module:hover{background:rgba(255,255,255,.05);border-color:rgba(255,255,255,.1);transform:translateX(4px)}
-  .tool-module.active{background:rgba(255,255,255,.08);border-color:var(--tool-glow);box-shadow:0 0 20px rgba(0,0,0,.2),inset 0 0 20px rgba(255,255,255,.05),0 0 40px -10px var(--tool-glow)}
-  .tool-aura{position:absolute;inset:-8px;background:radial-gradient(circle,var(--tool-glow),transparent 70%);opacity:.2;filter:blur(10px);animation:auraGlow 3s ease-in-out infinite}
-  @keyframes auraGlow{0%,100%{opacity:.2;transform:scale(1)}50%{opacity:.4;transform:scale(1.1)}}
-  .tool-icon{font-size:1.5rem;filter:grayscale(.3);transition:filter .3s ease}
-  .tool-module:hover .tool-icon,.tool-module.active .tool-icon{filter:grayscale(0)}
-  .tool-label{font-size:.625rem;text-transform:uppercase;letter-spacing:.05em;opacity:.6}
+  /* -------- Canvas */
+  .vx-canvas{grid-column:2;overflow:auto;padding:2rem 3rem;background:linear-gradient(180deg,var(--bg-1) 0%,var(--bg-0) 100%)}
+  .vx-msg{display:flex;gap:1rem;margin-bottom:2rem;opacity:0;transform:translateY(20px);animation:fadeIn .4s ease forwards;animation-delay:var(--d)}
+  @keyframes fadeIn{to{opacity:1;transform:none}}
+  .vx-ava{width:40px;height:40px;border-radius:var(--radius);background:var(--bg-glass);display:flex;align-items:center;justify-content:center;font-size:1.25rem;flex-shrink:0}
+  .vx-bubble{background:var(--bg-glass);border:1px solid var(--stroke);border-radius:calc(var(--radius)*1.25);padding:1rem 1.25rem;box-shadow:var(--shadow-lg);backdrop-filter:blur(10px)}
+  .vx-msg.assistant .vx-bubble{border-color:hsla(var(--eh),var(--es),60%,.45)}
+  .vx-cursor{opacity:.8;animation:blink 1s step-end infinite}
+  @keyframes blink{50%{opacity:0}}
 
-  .persona-selector{display:flex;gap:var(--spacing-xs);margin-top:auto;padding:var(--spacing-sm);background:rgba(255,255,255,.02);border-radius:12px}
-  .persona-chip{width:36px;height:36px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.02);border-radius:10px;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:.2s}
-  .persona-chip:hover{background:rgba(255,255,255,.05);transform:translateY(-2px)}
-  .persona-chip.active{background:var(--persona-color);border-color:var(--persona-color);box-shadow:0 4px 12px -2px var(--persona-color)}
+  /* -------- Input */
+  .vx-input{grid-column:2;display:flex;align-items:center;gap:1rem;background:var(--bg-glass);backdrop-filter:blur(18px);padding:1rem 1.5rem;border-top:1px solid var(--stroke)}
+  .vx-input textarea{flex:1;min-height:44px;max-height:160px;resize:none;border-radius:var(--radius);background:var(--bg-glass);border:1px solid var(--stroke);padding:.75rem 1rem;color:var(--text-1);font-size:1rem;line-height:1.4}
+  .vx-input textarea:focus{outline:none;border-color:hsla(var(--eh),var(--es),60%,.6);box-shadow:0 0 0 3px hsla(var(--eh),var(--es),50%,.25)}
+  .vx-send{width:48px;height:48px;border-radius:var(--radius);border:none;background:linear-gradient(135deg,hsla(var(--eh),var(--es),45%,.85),hsla(calc(var(--eh)+30),var(--es),40%,.85));display:flex;align-items:center;justify-content:center;color:#fff;cursor:pointer;transition:.25s}
+  .vx-send i{width:20px;height:20px}
+  .vx-send:disabled{opacity:.35;cursor:not-allowed}
+  .vx-send:hover:not(:disabled){transform:translateY(-2px);box-shadow:0 8px 20px -6px hsla(var(--eh),var(--es),50%,.6)}
 
-  /* -------------------------------- top controls */
-  .top-controls{grid-column:2;display:flex;justify-content:space-between;align-items:center;padding:0 var(--spacing-lg);background:rgba(0,0,0,.3);backdrop-filter:blur(10px);border-bottom:1px solid rgba(255,255,255,.05)}
-  .workspace-modes{display:flex;gap:var(--spacing-sm);padding:var(--spacing-xs);background:rgba(255,255,255,.02);border-radius:10px}
-  .mode-btn{padding:var(--spacing-sm) var(--spacing-md);border:none;background:transparent;color:rgba(255,255,255,.6);border-radius:8px;cursor:pointer;display:flex;align-items:center;gap:var(--spacing-xs);font-size:.875rem;transition:.2s}
-  .mode-btn:hover{background:rgba(255,255,255,.05);color:rgba(255,255,255,.9)}
-  .mode-btn.active{background:rgba(255,255,255,.1);color:#fff;box-shadow:inset 0 0 0 1px rgba(255,255,255,.1)}
-
-  /* -------------------------------- adaptive canvas */
-  .adaptive-canvas{grid-column:2;overflow-y:auto;overflow-x:hidden;padding:var(--spacing-xl);transition:.6s cubic-bezier(.4,0,.2,1);transform-origin:center}
-
-  /* focus mode */
-  .message-block{display:flex;gap:var(--spacing-md);margin-bottom:var(--spacing-lg);animation:messageSlide .3s ease-out forwards;opacity:0}
-  @keyframes messageSlide{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
-  .message-avatar{width:40px;height:40px;background:rgba(255,255,255,.05);border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:1.25rem;flex-shrink:0}
-  .message-content{flex:1}
-  .message-meta{font-size:.875rem;opacity:.6;margin-bottom:var(--spacing-xs)}
-  .message-body{line-height:1.6;color:rgba(255,255,255,.9)}
-  .streaming-text{position:relative}
-  .cursor-blink{animation:blink 1s ease-in-out infinite;color:hsla(var(--emotion-h),var(--emotion-s),60%,.8)}
-  @keyframes blink{0%,50%{opacity:1}50.1%,100%{opacity:0}}
-
-  /* dashboard mode */
-  .dashboard-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:var(--spacing-lg)}
-  .dashboard-card{background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.05);border-radius:16px;padding:var(--spacing-lg);transition:.3s;cursor:pointer}
-  .dashboard-card:hover{background:rgba(255,255,255,.04);border-color:rgba(255,255,255,.1);transform:translateY(-2px);box-shadow:0 10px 30px -10px rgba(0,0,0,.3)}
-
-  /* flow mode */
-  .flow-canvas{position:relative;width:100%;min-height:600px}
-  .flow-node{position:absolute;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.1);border-radius:12px;padding:var(--spacing-md);width:250px;cursor:move;transition:.3s}
-  .flow-node:hover{background:rgba(255,255,255,.05);box-shadow:0 8px 24px -8px rgba(0,0,0,.3)}
-
-  /* input zone */
-  .input-zone{grid-column:2;background:rgba(0,0,0,.6);backdrop-filter:blur(20px) saturate(150%);border-top:1px solid rgba(255,255,255,.05);padding:var(--spacing-lg)}
-  .format-selector{display:flex;gap:var(--spacing-sm);margin-bottom:var(--spacing-md);opacity:0;animation:fadeIn .3s ease-out forwards}
-  @keyframes fadeIn{to{opacity:1}}
-  .format-chip{padding:var(--spacing-xs) var(--spacing-md);background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.1);border-radius:20px;color:rgba(255,255,255,.6);font-size:.875rem;cursor:pointer;transition:.2s}
-  .format-chip:hover{background:rgba(255,255,255,.05);color:rgba(255,255,255,.9)}
-  .format-chip.active{background:hsla(var(--emotion-h),var(--emotion-s),50%,.2);border-color:hsla(var(--emotion-h),var(--emotion-s),60%,.5);color:#fff}
-  .input-container{display:flex;gap:var(--spacing-md);align-items:flex-end}
-  .dynamic-input{flex:1;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:var(--spacing-md) var(--spacing-lg);color:#fff;font-size:1rem;line-height:1.5;resize:none;transition:.3s}
-  .dynamic-input:focus{outline:none;background:rgba(255,255,255,.05);border-color:hsla(var(--emotion-h),var(--emotion-s),60%,.5);box-shadow:0 0 0 4px hsla(var(--emotion-h),var(--emotion-s),50%,.1),inset 0 0 20px rgba(255,255,255,.02)}
-  .send-button{width:48px;height:48px;border:none;background:linear-gradient(135deg,hsla(var(--emotion-h),var(--emotion-s),50%,.8),hsla(calc(var(--emotion-h)+30),var(--emotion-s),40%,.8));border-radius:14px;display:flex;align-items:center;justify-content:center;color:#fff;cursor:pointer;transition:.3s;position:relative;overflow:hidden}
-  .send-button::before{content:'';position:absolute;inset:0;background:radial-gradient(circle at center,#fff,transparent);opacity:0;transition:.3s}
-  .send-button:hover:not(:disabled){transform:scale(1.05);box-shadow:0 8px 24px -8px hsla(var(--emotion-h),var(--emotion-s),50%,.5)}
-  .send-button:hover:not(:disabled)::before{opacity:.1}
-  .send-button:active:not(:disabled){transform:scale(.95)}
-  .send-button:disabled{opacity:.3;cursor:not-allowed}
-
-  /* command palette */
-  .command-palette{display:flex;align-items:center;gap:var(--spacing-sm);background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.2);border-radius:12px;padding:var(--spacing-md)}
-  .command-prefix{color:#60A5FA;font-weight:600;font-size:1.125rem}
-  .command-palette input{flex:1;background:none;border:none;color:#fff;font-size:1rem;outline:none}
-
-  /* MQ */
-  @media(max-width:768px){.vanguard{grid-template-columns:1fr;grid-template-rows:auto 1fr auto}.tool-sidebar{position:fixed;left:-80px;transition:left .3s}.tool-sidebar.open{left:0}.top-controls,.adaptive-canvas,.input-zone{grid-column:1}}
-  @media(prefers-reduced-motion:reduce){*{animation-duration:.01ms!important;transition-duration:.01ms!important}}
-  @media(prefers-contrast:high){.tool-module,.message-block,.dashboard-card{border-width:2px}}
+  /* -------- Utilities */
+  @media(max-width:820px){.vx-root{grid-template-columns:72px 1fr}.vx-canvas{padding:1.5rem}}
 </style>
