@@ -29,6 +29,14 @@ export const POST: RequestHandler = async ({ request }) => {
 
     } catch (error) {
         console.error('Backend Error:', error);
-        return new Response('An internal error occurred in the API.', { status: 500 });
+        
+        // PROTOCOL BEACON DIAGNOSTIC CODE:
+        // This is insecure for production but essential for debugging.
+        // It sends the real error message back to the client.
+        const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred.';
+        return new Response(JSON.stringify({ error: errorMessage }), { 
+            status: 500,
+            headers: { 'Content-Type': 'application/json' }
+        });
     }
 };
