@@ -44,25 +44,25 @@
             const reader = response.body.getReader();
             const decoder = new TextDecoder();
             
-            // CORRECTED: The onParse callback is now correctly passed inside an object.
-            const onParse = (event: ParsedEvent | ReconnectInterval) => {
-                if (event.type === 'event') {
-                    if (event.data === '[DONE]') return;
-                    try {
-                        const data = JSON.parse(event.data);
-                        const newText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-                        if (newText) {
-                            messages[messages.length - 1].content += newText;
-                            messages = messages;
-                            scrollToBottom();
+            // CORRECTED: The parser now uses the 'onEvent' property as specified by the error message.
+            const parser = createParser({
+                onEvent: (event: ParsedEvent | ReconnectInterval) => {
+                    if (event.type === 'event') {
+                        if (event.data === '[DONE]') return;
+                        try {
+                            const data = JSON.parse(event.data);
+                            const newText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+                            if (newText) {
+                                messages[messages.length - 1].content += newText;
+                                messages = messages;
+                                scrollToBottom();
+                            }
+                        } catch (e) {
+                            console.error('Error parsing stream data:', e);
                         }
-                    } catch (e) {
-                        console.error('Error parsing stream data:', e);
                     }
                 }
-            };
-            
-            const parser = createParser(onParse);
+            });
 
             // Read the stream until it's finished
             while (true) {
