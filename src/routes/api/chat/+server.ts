@@ -2,46 +2,68 @@ import type { RequestHandler } from '@sveltejs/kit';
 import { error } from '@sveltejs/kit';
 
 export const POST: RequestHandler = async ({ request }) => {
-    try {
-        const { prompt, persona } = await request.json();
+	try {
+		const { prompt, persona } = await request.json();
 
-        const systemInstruction = `Your current persona is '${persona}'. Respond in that distinct style, befitting your name and role.`;
-        const finalPrompt = `${systemInstruction}\n\nUser Question: "${prompt}"`;
+		const systemInstruction = `Your current persona is '${persona}'. Respond in that distinct style, befitting your name and role.`;
+		const finalPrompt = `${systemInstruction}\n\nUser Question: "${prompt}"`;
 
-        // The single, correct proxy endpoint provided by the General.
-        // NOTE: The model name is adapted from your curl command, but using the 'streamGenerateContent' method 
-        // from your original UI code to ensure the streaming works.
-        const proxyApiUrl = 'https://key.ematthew477.workers.dev/v1beta/models/gemini-2.5-flash-preview-05-20:streamGenerateContent';
-        
-        const apiRequestBody = {
-            contents: [{ parts: [{ text: finalPrompt }] }],
-        };
+		const proxyApiUrl =
+			'https://key.ematthew477.workers.dev/v1beta/models/gemini-2.5-flash-preview-05-20:streamGenerateContent';
 
-        // This is now the ONLY fetch call made by this endpoint.
-        const proxyResponse = await fetch(proxyApiUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(apiRequestBody),
-        });
+		const apiRequestBody = {
+			contents: [{ parts: [{ text: finalPrompt }] }]
+		};
 
-        // Check if the proxy itself returned an error.
-        if (!proxyResponse.ok) {
-            const errorBody = await proxyResponse.text();
-            throw new Error(`Proxy server failed with status ${proxyResponse.status}: ${errorBody}`);
-        }
+		const proxyResponse = await fetch(proxyApiUrl, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify(apiRequestBody)
+		});
 
-        if (!proxyResponse.body) {
-            throw new Error('Proxy response has no body.');
-        }
+		if (!proxyResponse.ok) {
+			const errorBody = await proxyResponse.text();
+			throw new Error(`Proxy server failed with status ${proxyResponse.status}: ${errorBody}`);
+		}
 
-        // Stream the response from the proxy directly to the client.
-        return new Response(proxyResponse.body, { 
-            headers: { 'Content-Type': 'text/plain' } 
-        });
+		if (!proxyResponse.body) {
+			throw new Error('Proxy response has no body.');
+		}
 
-    } catch (err) {
-        const message = err instanceof Error ? err.message : 'An unknown error occurred.';
-        console.error('API Endpoint Error:', message);
-        throw error(500, `API Error: ${message}`);
-    }
+		// CORRECTED IMPLEMENTATION: Manually pipe the stream.
+		// This is more robust in serverless environments than just passing the body.
+		const reader = proxyResponse.body.getReader();
+		const stream = new ReadableStream({
+			async start(controller) {
+				// This function will pump data from the proxy to the client.
+				try {
+					while (true) {
+						const { done, value } = await reader.read();
+						if (done) {
+							break; // Exit the loop when the stream is finished.
+						}
+						// SERVER-SIDE LOG: Check your Cloudflare deployment logs for this message.
+						console.log('Chunk received from proxy, enqueuing to client.');
+						controller.enqueue(value); // Send the chunk to the client.
+					}
+				} catch (err) {
+					console.error('Error while pumping stream:', err);
+					controller.error(err);
+				} finally {
+					controller.close(); // Close the stream when done.
+					reader.releaseLock();
+				}
+			}
+		});
+
+		// Return the response with our new, controlled stream.
+		return new Response(stream, {
+			headers: { 'Content-Type': 'text/plain; charset=utf-8' }
+		});
+		
+	} catch (err) {
+		const message = err instanceof Error ? err.message : 'An unknown error occurred.';
+		console.error('API Endpoint Error:', message);
+		throw error(500, `API Error: ${message}`);
+	}
 };
