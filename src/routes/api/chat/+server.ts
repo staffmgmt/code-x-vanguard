@@ -8,10 +8,8 @@ export const POST: RequestHandler = async ({ request }) => {
         // The proxy worker URL from your successful test
         const proxyApiUrl = "https://key.ematthew477.workers.dev/v1beta/models/gemini-2.5-flash-preview-05-20:streamGenerateContent";
 
-        // This instruction set is sent to the AI along with the user's prompt
         const systemInstruction = `Your current persona is '${persona}'. Respond in that distinct style, befitting your name and role.`;
         
-        // Combine all context into the final prompt
         const contextText = Array.isArray(context) && context.length > 0
             ? `Use the following selected context to inform your answer:\n---\n${context.join('\n---\n')}\n---\n`
             : '';

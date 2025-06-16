@@ -52,24 +52,19 @@
           const lines = chunk.split('\n');
           
           for (const line of lines) {
-            // The Gemini API often streams data with a "data: " prefix in SSE format
             if (line.startsWith('data: ')) {
               try {
-                // Extract the JSON payload from the line
                 const jsonPayload = line.substring(5).trim();
                 if (jsonPayload) {
                     const data = JSON.parse(jsonPayload);
-                    // Safely access the deeply nested text property
                     const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
                     if (text) {
                       fullContent += text;
-                      // Update the node in the store with the new content fragment
                       updateNode(aiNodeId, { content: fullContent });
                     }
                 }
               } catch (e) {
-                // This catch block handles cases where a JSON object is split across chunks.
-                // It safely ignores parsing errors and waits for the next chunk.
+                // Safely ignore incomplete JSON chunks during streaming
               }
             }
           }
@@ -128,15 +123,15 @@
 
 <style>
   .workspace {
-    padding-top: 64px; /* Space for TopBar */
-    margin-left: 56px; /* Space for LeftRail */
-    padding-bottom: 120px; /* Space for Composer */
+    padding-top: 64px;
+    margin-left: 56px;
+    padding-bottom: 120px;
     min-height: 100vh;
     transition: margin-left var(--transition-base);
   }
   
   .workspace.sidebar-open {
-    margin-left: 288px; /* Adjust as needed for your sidebar's width */
+    margin-left: 288px;
   }
   
   .chat-stream {
