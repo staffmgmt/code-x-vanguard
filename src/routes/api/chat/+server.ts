@@ -2,38 +2,42 @@ import type { RequestHandler } from '@sveltejs/kit';
 
 export const POST: RequestHandler = async ({ request }) => {
     try {
-        const { prompt, persona } = await request.json();
+        const body = await request.json();
+        const { prompt, persona, context } = body;
+
+        // The proxy worker URL from your successful test
+        const proxyApiUrl = "https://key.ematthew477.workers.dev/v1beta/models/gemini-2.5-flash-preview-05-20:streamGenerateContent";
 
         // This instruction set is sent to the AI along with the user's prompt
         const systemInstruction = `Your current persona is '${persona}'. Respond in that distinct style, befitting your name and role.`;
-        const finalPrompt = `${systemInstruction}\n\nUser Question: "${prompt}"`;
-
-        // 1. Fetch the rotating API key
-        const keyResponse = await fetch('https://div3rcity.me/key');
-        if (!keyResponse.ok) {
-            throw new Error('Failed to fetch rotating API key.');
-        }
-        const geminiKey = await keyResponse.text();
-
-        // 2. Construct the proper request to the official Google Gemini API endpoint
-        const geminiApiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro-flash:streamGenerateContent?key=${geminiKey}`;
         
+        // Combine all context into the final prompt
+        const contextText = Array.isArray(context) && context.length > 0
+            ? `Use the following selected context to inform your answer:\n---\n${context.join('\n---\n')}\n---\n`
+            : '';
+        const finalPrompt = `${systemInstruction}\n\n${contextText}User Question: "${prompt}"`;
+
         const apiRequestBody = {
             contents: [{ parts: [{ text: finalPrompt }] }],
         };
 
-        const geminiResponse = await fetch(geminiApiUrl, {
+        const geminiResponse = await fetch(proxyApiUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(apiRequestBody),
         });
 
-        if (!geminiResponse.body) {
-            throw new Error('Gemini API response has no body.');
+        if (!geminiResponse.ok || !geminiResponse.body) {
+            const errorText = await geminiResponse.text();
+            throw new Error(`Proxy API Error: ${geminiResponse.status} ${geminiResponse.statusText} - ${errorText}`);
         }
 
-        // 3. Stream the response back to the client
-        return new Response(geminiResponse.body, { headers: { 'Content-Type': 'text/plain' } });
+        // Stream the response directly back to the client
+        return new Response(geminiResponse.body, {
+            headers: {
+                'Content-Type': 'text/event-stream',
+            }
+        });
 
     } catch (error) {
         console.error('Backend Error:', error);
