@@ -9,7 +9,7 @@
   import Composer from '$lib/components/Composer.svelte';
   import CommandPalette from '$lib/components/CommandPalette.svelte';
   import CollapsibleSidebar from '$lib/components/CollapsibleSidebar.svelte';
-  import '../app.scss';
+
   
   let sidebarOpen = false;
   
