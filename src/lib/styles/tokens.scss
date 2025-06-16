@@ -1,0 +1,50 @@
+// Design Tokens for LLM Workbench v4.1
+
+// Color Primitives
+$abyss-black: #000000;
+$obsidian: #121212;
+$graphite: #2A2A2A;
+$titanium: #B9BDC1;
+$electric-teal: #00FFC2;
+$violet-aura: #9F4DFF;
+$midnight-gradient-stop: #070718;
+$error-red: #FF4444;
+
+// Semantic Tokens
+:root {
+  --surface-primary: #{$obsidian};
+  --surface-elevated: #{$graphite};
+  --border-default: #{$titanium};
+  --accent-primary: #{$electric-teal};
+  --accent-glow: #{$violet-aura};
+  --text-primary: #{$titanium};
+  --text-secondary: rgba(185, 189, 193, 0.7);
+
+  // Typography
+  --font-heading: 'IBM Plex Sans', system-ui, sans-serif;
+  --font-body: 'Inter', system-ui, sans-serif;
+
+  // Spacing (4pt grid)
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-16: 64px;
+
+  // Radii
+  --radius-sm: 8px;
+  --radius-md: 12px;
+
+  // Effects
+  --glass-blur: blur(4px);
+  --aura-glow: 0 0 12px rgba(159, 77, 255, 0.06);
+  --focus-ring: 0 0 0 2px #{$electric-teal};
+
+  // Transitions
+  --transition-fast: 180ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-base: 280ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-slow: 400ms cubic-bezier(0.4, 0, 0.2, 1);
+}

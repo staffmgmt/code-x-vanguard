@@ -1,226 +1,147 @@
-<script>
-  import { tick } from 'svelte';
-  import { dndzone } from 'svelte-dnd-action';
-  import { flip } from 'svelte/animate';
-  import { Send } from 'lucide-svelte';
-  import { fetchEventSource } from '@microsoft/fetch-event-source';
-  
-  import CollapsibleSidebar from '$lib/components/CollapsibleSidebar.svelte';
+<script lang="ts">
+  import { onMount } from 'svelte';
+  import { nodes, addNode, updateNode, selectedNodeIds, currentPersona } from '$lib/stores/workbench';
+  import Starfield from '$lib/components/Starfield.svelte';
+  import TopBar from '$lib/components/TopBar.svelte';
+  import LeftRail from '$lib/components/LeftRail.svelte';
   import CanvasNode from '$lib/components/CanvasNode.svelte';
-  import { canvasNodes, selectedNodes, isThinking } from '$lib/stores/canvas.js';
+  import Composer from '$lib/components/Composer.svelte';
+  import CommandPalette from '$lib/components/CommandPalette.svelte';
+  import CollapsibleSidebar from '$lib/components/CollapsibleSidebar.svelte';
+  import '../app.scss';
   
-  let messages = [];
-  let inputText = '';
-  let isThinkingLocal = false;
-  let canvasElement;
+  let sidebarOpen = false;
   
-  $: isThinkingLocal = $isThinking;
-  canvasNodes.subscribe(value => {
-    messages = value;
-  });
-
-  const flipDurationMs = 200;
-  
-  function handleConsider(e) {
-    messages = e.detail.items;
-  }
-  
-  function handleFinalize(e) {
-    messages = e.detail.items;
-    canvasNodes.set(messages);
-  }
-  
-  function handleNodeSelect(event) {
-    const nodeId = event.detail.id;
-    selectedNodes.update(currentSelected => {
-      const newSelected = new Set(currentSelected);
-      if (newSelected.has(nodeId)) {
-        newSelected.delete(nodeId);
-      } else {
-        newSelected.add(nodeId);
-      }
-      return newSelected;
-    });
-  }
-  
-  async function handleSubmit() {
-    if (!inputText.trim() || isThinkingLocal) return;
-
-    isThinking.set(true);
-    const userMessageContent = inputText;
-    
-    const userMessage = {
-      id: `msg-${Date.now()}`,
+  async function handleSend(message: string) {
+    // Add user message
+    addNode({
       role: 'user',
-      content: userMessageContent,
-      timestamp: new Date().toISOString(),
-      x: Math.random() * 400 + 100,
-      y: (messages.length / 2) * 150 + 100
-    };
+      content: message,
+      status: 'complete'
+    });
     
-    canvasNodes.update(nodes => [...nodes, userMessage]);
-    inputText = '';
-    await tick();
-    
-    const aiMessage = {
-      id: `msg-${Date.now()}-ai`,
+    // Add AI response placeholder
+    const aiNodeId = addNode({
       role: 'ai',
       content: '',
-      timestamp: new Date().toISOString(),
-      x: userMessage.x + Math.random() * 200 + 350,
-      y: userMessage.y
-    };
-    
-    canvasNodes.update(nodes => [...nodes, aiMessage]);
-    
-    // Find the index of the newly added AI message
-    let aiMessageIndex = -1;
-    const unsubscribe = canvasNodes.subscribe(nodes => {
-        aiMessageIndex = nodes.findIndex(n => n.id === aiMessage.id);
+      status: 'streaming'
     });
-    unsubscribe();
-
+    
+    // Stream AI response
     try {
-      await fetchEventSource('/api/chat', {
+      const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          prompt: userMessageContent, 
-          persona: 'default',
-          context: Array.from($selectedNodes).map(id => 
-            messages.find(m => m.id === id)?.content
-          ).filter(Boolean)
-        }),
-
-        onopen: async (response) => {
-          if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(`API Error: ${response.status} ${response.statusText} - ${errorText}`);
-          }
-        },
-
-        onmessage: (event) => {
-            // **FIXED LOGIC**: Directly append the raw text data from the stream.
-            // The backend is piping the Gemini stream, which is raw text, not JSON objects per event.
-            if (aiMessageIndex !== -1) {
-              canvasNodes.update(nodes => {
-                  const newNodes = [...nodes];
-                  newNodes[aiMessageIndex].content += event.data;
-                  return newNodes;
-              });
-            }
-        },
-        
-        onerror: (err) => {
-          if (aiMessageIndex !== -1) {
-              canvasNodes.update(nodes => {
-                  const newNodes = [...nodes];
-                  newNodes[aiMessageIndex].content = 'Error: Failed to get response. Please check the console and try again.';
-                  return newNodes;
-              });
-          }
-          isThinking.set(false);
-          throw err;
-        },
-
-        onclose: () => {
-          isThinking.set(false);
-        }
+        body: JSON.stringify({
+          prompt: message,
+          persona: $currentPersona,
+          context: [] // Future: Populate with content from $selectedNodes
+        })
       });
+      
+      if (response.ok && response.body) {
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let fullContent = '';
+        
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          
+          const chunk = decoder.decode(value, { stream: true });
+          const lines = chunk.split('\n');
+          
+          for (const line of lines) {
+            // The Gemini API often streams data with a "data: " prefix in SSE format
+            if (line.startsWith('data: ')) {
+              try {
+                // Extract the JSON payload from the line
+                const jsonPayload = line.substring(5).trim();
+                if (jsonPayload) {
+                    const data = JSON.parse(jsonPayload);
+                    // Safely access the deeply nested text property
+                    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+                    if (text) {
+                      fullContent += text;
+                      // Update the node in the store with the new content fragment
+                      updateNode(aiNodeId, { content: fullContent });
+                    }
+                }
+              } catch (e) {
+                // This catch block handles cases where a JSON object is split across chunks.
+                // It safely ignores parsing errors and waits for the next chunk.
+              }
+            }
+          }
+        }
+        
+        updateNode(aiNodeId, { status: 'complete' });
+      } else {
+        throw new Error(`API returned ${response.status}`);
+      }
     } catch (error) {
-      console.error('Chat stream failed:', error);
-      isThinking.set(false);
+      console.error('Chat error:', error);
+      updateNode(aiNodeId, { 
+        content: 'Sorry, I encountered an error. Please try again.',
+        status: 'complete'
+      });
     }
   }
   
-  function handleKeydown(e) {
-    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-      handleSubmit();
+  onMount(() => {
+    // Initialize with a welcome message if the session is new
+    if ($nodes.length === 0) {
+      addNode({
+        role: 'ai',
+        content: 'Welcome to the Vanguard Workbench. How can I assist you today?',
+        status: 'complete'
+      });
     }
-  }
+  });
 </script>
 
-<svelte:window on:keydown={handleKeydown} />
+<svelte:head>
+  <title>Vanguard Workbench</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+</svelte:head>
 
-<div class="flex h-screen bg-deep-charcoal overflow-hidden text-soft-titanium">
+<Starfield />
+<TopBar />
+<LeftRail bind:sidebarOpen />
+
+{#if sidebarOpen}
   <CollapsibleSidebar />
-  
-  <main class="flex-1 relative overflow-hidden">
-    <div 
-      bind:this={canvasElement}
-      class="absolute inset-0 overflow-auto"
-      style="background-image: radial-gradient(circle, rgba(185, 189, 193, 0.05) 1px, transparent 1px); background-size: 50px 50px;"
-    >
-      <div
-        class="relative min-h-full min-w-full p-8"
-        use:dndzone={{ 
-          items: messages, 
-          flipDurationMs,
-          dropTargetStyle: {}
-        }}
-        on:consider={handleConsider}
-        on:finalize={handleFinalize}
-      >
-        {#each messages as node (node.id)}
-          <div
-            animate:flip={{ duration: flipDurationMs }}
-            class="absolute"
-            style="left: {node.x}px; top: {node.y}px;"
-          >
-            <CanvasNode 
-              {node} 
-              isSelected={$selectedNodes.has(node.id)}
-              on:select={handleNodeSelect}
-            />
-          </div>
-        {/each}
-      </div>
-    </div>
-    
-    <div class="absolute bottom-0 left-0 right-0 p-6 bg-gradient-to-t from-deep-charcoal via-deep-charcoal/95 to-transparent">
-      <div class="max-w-4xl mx-auto">
-        <form on:submit|preventDefault={handleSubmit} class="relative">
-          <textarea
-            bind:value={inputText}
-            disabled={isThinkingLocal}
-            rows="1"
-            class="w-full px-6 py-4 pr-16 bg-graphite border-2 border-soft-titanium/20 rounded-xl text-soft-titanium placeholder-soft-titanium/40 focus:border-electric-teal focus:outline-none focus:ring-2 focus:ring-electric-teal/20 transition-all disabled:opacity-50 resize-none"
-            placeholder={isThinkingLocal ? "Vanguard is thinking..." : "Enter your prompt... (Ctrl+Enter to send)"}
-            aria-label="Message input"
-          ></textarea>
-          <button
-            type="submit"
-            disabled={isThinkingLocal || !inputText.trim()}
-            class="absolute right-3 top-1/2 -translate-y-1/2 p-2 bg-electric-teal rounded-lg hover:bg-electric-teal/90 disabled:bg-soft-titanium/20 disabled:cursor-not-allowed transition-all"
-            aria-label="Send message"
-          >
-            <Send class="w-5 h-5 text-deep-charcoal" />
-          </button>
-        </form>
-      </div>
-    </div>
-  </main>
-</div>
+{/if}
+
+<main class="workspace" class:sidebar-open={sidebarOpen}>
+  <div class="chat-stream">
+    {#each $nodes as node (node.id)}
+      <CanvasNode {node} selected={$selectedNodeIds.has(node.id)} />
+    {/each}
+  </div>
+</main>
+
+<Composer onSend={handleSend} />
+<CommandPalette />
 
 <style>
-  :global(html) {
-    scroll-behavior: smooth;
+  .workspace {
+    padding-top: 64px; /* Space for TopBar */
+    margin-left: 56px; /* Space for LeftRail */
+    padding-bottom: 120px; /* Space for Composer */
+    min-height: 100vh;
+    transition: margin-left var(--transition-base);
   }
-  :global(body) {
-    overflow: hidden;
+  
+  .workspace.sidebar-open {
+    margin-left: 288px; /* Adjust as needed for your sidebar's width */
   }
-  :global(::-webkit-scrollbar) {
-    width: 8px;
-    height: 8px;
-  }
-  :global(::-webkit-scrollbar-track) {
-    background: transparent;
-  }
-  :global(::-webkit-scrollbar-thumb) {
-    background: rgba(185, 189, 193, 0.2);
-    border-radius: 4px;
-  }
-  :global(::-webkit-scrollbar-thumb:hover) {
-    background: rgba(0, 255, 194, 0.3);
+  
+  .chat-stream {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: var(--space-8);
   }
 </style>
