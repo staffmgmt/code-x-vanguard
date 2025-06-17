@@ -1,7 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { nodes, addNode, updateNode, isThinking, selectedNodeIds, currentPersona } from '$lib/stores/workbench';
-  import { fetchEventSource } from '@microsoft/fetch-event-source';
+  import { nodes, addNode, updateNode, selectedNodeIds, currentPersona } from '$lib/stores/workbench';
   import Starfield from '$lib/components/Starfield.svelte';
   import TopBar from '$lib/components/TopBar.svelte';
   import LeftRail from '$lib/components/LeftRail.svelte';
@@ -9,99 +8,137 @@
   import Composer from '$lib/components/Composer.svelte';
   import CommandPalette from '$lib/components/CommandPalette.svelte';
   import CollapsibleSidebar from '$lib/components/CollapsibleSidebar.svelte';
-
+  import StarBackground from '$lib/components/StarBackground.svelte';
+  import '../app.scss';
   
   let sidebarOpen = false;
   
   async function handleSend(message: string) {
-    if (!message.trim()) return;
-
-    // 1. Add the user's message to the UI immediately.
+    // Add user message
     addNode({
       role: 'user',
       content: message,
       status: 'complete'
     });
     
-    // 2. Set the "thinking" state to provide user feedback.
-    isThinking.set(true);
-
-    // 3. Add the AI's placeholder node to the UI.
+    // Add AI response placeholder
     const aiNodeId = addNode({
       role: 'ai',
       content: '',
       status: 'streaming'
     });
     
-    let fullContent = '';
-    const ctrl = new AbortController();
-
-    // 4. Initiate the streaming request using the specified Microsoft library.
-    await fetchEventSource('/api/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        prompt: message,
-        persona: $currentPersona,
-        context: [] // Future: Populate with selected context
-      }),
-      signal: ctrl.signal,
-
-      // This handler is called when the connection is opened.
-      onopen: async (response) => {
-        if (!response.ok) {
-          ctrl.abort(); // Stop the request if the server returns an error.
-          const errorText = await response.text();
-          throw new Error(`API Error: ${response.status} - ${errorText}`);
-        }
-      },
-
-      // This handler is called for each message received from the stream.
-      onmessage(event) {
-        // The event.data contains the JSON payload from the API.
-        if (event.data) {
-          try {
-            const data = JSON.parse(event.data);
-            // The actual text is nested deep inside the JSON object.
-            const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-
-            if (text) {
-              fullContent += text;
-              // Update the node in the store with the accumulated content.
-              updateNode(aiNodeId, { content: fullContent });
-            }
-          } catch (e) {
-            // Safely ignore any non-JSON messages (like keep-alive pings).
-          }
-        }
-      },
+    // Stream AI response
+    try {
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: message,
+          persona: $currentPersona,
+          context: [] // Future: Populate with content from $selectedNodes
+        })
+      });
       
-      // This handler is called when the server explicitly closes the connection.
-      onclose() {
+      if (response.ok && response.body) {
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let fullContent = '';
+        
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          
+          // Just append the text - our API now filters it properly
+          const chunk = decoder.decode(value, { stream: true });
+          fullContent += chunk;
+          updateNode(aiNodeId, { content: fullContent });
+        }
+        
         updateNode(aiNodeId, { status: 'complete' });
-        isThinking.set(false);
-      },
-
-      // This handler is called on network errors or if an error is thrown from onopen.
-      onerror(err) {
-        updateNode(aiNodeId, {
-          content: `An error occurred: ${err.message}`,
-          status: 'complete'
-        });
-        isThinking.set(false);
-        // It's important to throw the error to stop the request.
-        throw err;
+      } else {
+        throw new Error(`API returned ${response.status}`);
       }
-    });
+    } catch (error) {
+      console.error('Chat error:', error);
+      updateNode(aiNodeId, { 
+        content: 'Sorry, I encountered an error. Please try again.',
+        status: 'complete'
+      });
+    }
   }
   
   onMount(() => {
+    // Initialize with a welcome message if the session is new
     if ($nodes.length === 0) {
       addNode({
         role: 'ai',
-        content: 'Welcome to the Vanguard Workbench. How can I assist you today?',
+        content: 'Howdy, Welcome to Div3rcity',
         status: 'complete'
       });
     }
   });
 </script>
+
+<svelte:head>
+  <title>Div3rcity | Chat</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+</svelte:head>
+
+<StarBackground />
+<Starfield />
+<TopBar />
+<LeftRail bind:sidebarOpen />
+
+{#if sidebarOpen}
+  <CollapsibleSidebar />
+{/if}
+
+<main class="workspace" class:sidebar-open={sidebarOpen}>
+  <div class="chat-stream">
+    {#each $nodes as node (node.id)}
+      <CanvasNode {node} selected={$selectedNodeIds.has(node.id)} />
+    {/each}
+  </div>
+</main>
+
+<Composer onSend={handleSend} />
+<CommandPalette />
+
+<style>
+  .workspace {
+    padding-top: 64px; /* Space for TopBar */
+    margin-left: 56px; /* Space for LeftRail */
+    padding-bottom: 120px; /* Space for Composer */
+    min-height: 100vh;
+    transition: margin-left var(--transition-base);
+  }
+  
+  .workspace.sidebar-open {
+    margin-left: 288px; /* Adjust as needed for your sidebar's width */
+  }
+  
+  .chat-stream {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    max-width: 960px;
+    margin: 0 auto;
+    padding: var(--space-8);
+  }
+
+  
+  :global(.canvas-node.user) {
+    align-self: flex-start;
+    max-width: 80%;
+    margin-right: 15%;
+  }
+  
+  :global(.canvas-node.ai) {
+    align-self: flex-end;
+    max-width: 100%;
+  }
+  
+</style>

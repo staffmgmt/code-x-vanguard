@@ -1,174 +1,180 @@
 <script lang="ts">
-  import { composerExpanded, commandPaletteOpen } from '$lib/stores/workbench';
-  import MagneticButton from './MagneticButton.svelte';
+  import { 
+    isThinking,
+    composerExpanded
+  } from '$lib/stores/workbench';
   
-  export let onSend: (message: string) => void;
+  // Add properly typed onSend prop with default value
+  export let onSend: ((message: string) => void) | undefined = undefined;
   
   let message = '';
-  let textarea: HTMLTextAreaElement;
   
-  function handleKeydown(e: KeyboardEvent) {
-    if (e.key === '/' && message === '') {
-      e.preventDefault();
-      $commandPaletteOpen = true;
-    } else if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
+  function handleSend() {
+    if (!message.trim() || $isThinking) return;
+    
+    // Call the onSend function if it exists
+    if (onSend) {
+      onSend(message);
+      message = '';
+    }
+  }
+  
+  function handleKeydown(event) {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
       handleSend();
     }
   }
   
-  function handleSend() {
-    if (message.trim()) {
-      onSend(message);
-      message = '';
-      $composerExpanded = false;
-    }
-  }
-  
-  function handleFocus() {
-    $composerExpanded = true;
-  }
-  
-  function handleBlur() {
-    if (!message) {
-      $composerExpanded = false;
-    }
+  function toggleExpanded() {
+    $composerExpanded = !$composerExpanded;
   }
 </script>
 
-<div class="composer {$composerExpanded ? 'expanded' : ''}">
-  <div class="input-wrapper">
-    {#if !message && !$composerExpanded}
-      <span class="hint">
-        <kbd>/</kbd> Type a message...
-      </span>
-    {/if}
-    
+<div class="composer" class:expanded={$composerExpanded}>
+  <div class="composer-container">
     <textarea
-      bind:this={textarea}
       bind:value={message}
       on:keydown={handleKeydown}
-      on:focus={handleFocus}
-      on:blur={handleBlur}
-      placeholder={$composerExpanded ? "Ask anything..." : ""}
-      rows="1"
-      aria-label="Message input"
-    />
+      placeholder={!message && !$composerExpanded ? '/ Type a message...' : ''}
+      rows={$composerExpanded ? 5 : 1}
+      disabled={$isThinking}
+    ></textarea>
     
     <div class="actions">
-      <button class="icon-btn" aria-label="Voice input">
+      <button 
+        type="button"
+        class="action-button"
+        on:click={() => {/* Voice input implementation */}}
+        aria-label="Voice input"
+        disabled={$isThinking}
+      >
         🎙️
       </button>
-      <button class="icon-btn" aria-label="Attach file">
+      
+      <button 
+        type="button"
+        class="action-button"
+        on:click={() => {/* Attachment implementation */}}
+        aria-label="Attach file"
+        disabled={$isThinking}
+      >
         📎
       </button>
-      <MagneticButton 
+      
+      <button
+        type="button"
+        class="send-button"
         on:click={handleSend}
-        label="➤"
-        primary
-        small
-      />
+        disabled={!message.trim() || $isThinking}
+        aria-label="Send message"
+      >
+        Send
+      </button>
     </div>
   </div>
+  
+  <button 
+    type="button"
+    class="expand-button"
+    on:click={toggleExpanded}
+    aria-label={$composerExpanded ? "Collapse composer" : "Expand composer"}
+  >
+    {$composerExpanded ? '▼' : '▲'}
+  </button>
 </div>
 
 <style>
   .composer {
     position: fixed;
     bottom: 0;
-    left: 56px;
+    left: 0;
     right: 0;
-    background: var(--surface-primary);
+    background-color: var(--surface-elevated);
     border-top: 1px solid var(--border-default);
-    padding: var(--space-4) var(--space-6);
+    padding: var(--space-4);
     transition: all var(--transition-base);
-    z-index: 100;
   }
   
-  .input-wrapper {
-    position: relative;
-    max-width: 840px;
-    margin: 0 auto;
+  .composer.expanded {
+    height: 12rem;
+  }
+  
+  .composer-container {
     display: flex;
-    align-items: flex-end;
-    gap: var(--space-3);
+    flex-direction: column;
   }
   
   textarea {
-    flex: 1;
-    min-height: 40px;
-    max-height: 160px;
-    padding: var(--space-3) var(--space-4);
-    background: var(--surface-elevated);
-    border: 1px solid var(--border-default);
-    border-radius: var(--radius-sm);
+    width: 100%;
+    background-color: var(--surface-primary);
     color: var(--text-primary);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-md);
+    padding: var(--space-3);
     font-family: var(--font-body);
     font-size: 1rem;
-    line-height: 1.5;
     resize: none;
-    transition: all var(--transition-base);
-  }
-  
-  .composer:not(.expanded) textarea {
-    min-height: 40px;
-  }
-  
-  .composer.expanded textarea {
-    min-height: 80px;
+    transition: all var(--transition-fast);
   }
   
   textarea:focus {
     outline: none;
     border-color: var(--accent-primary);
-  }
-  
-  .hint {
-    position: absolute;
-    left: var(--space-4);
-    top: 50%;
-    transform: translateY(-50%);
-    color: var(--text-secondary);
-    font-size: 0.875rem;
-    pointer-events: none;
-  }
-  
-  kbd {
-    display: inline-block;
-    padding: 2px 6px;
-    background: var(--surface-elevated);
-    border: 1px solid var(--border-default);
-    border-radius: 4px;
-    font-family: monospace;
-    font-size: 0.75rem;
+    box-shadow: var(--focus-ring);
   }
   
   .actions {
     display: flex;
-    align-items: center;
+    justify-content: flex-end;
     gap: var(--space-2);
+    margin-top: var(--space-2);
   }
   
-  .icon-btn {
-    width: 36px;
-    height: 36px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: transparent;
+  .action-button {
+    background: none;
     border: none;
-    font-size: 20px;
+    color: var(--text-secondary);
+    font-size: 1.2rem;
     cursor: pointer;
-    opacity: 0.7;
-    transition: opacity var(--transition-fast);
+    transition: color var(--transition-fast);
+    padding: var(--space-1);
   }
   
-  .icon-btn:hover {
-    opacity: 1;
+  .action-button:hover {
+    color: var(--text-primary);
   }
   
-  .icon-btn:focus-visible {
-    outline: none;
-    opacity: 1;
+  .send-button {
+    background-color: var(--accent-primary);
+    color: var(--surface-primary);
+    border: none;
+    border-radius: var(--radius-sm);
+    padding: var(--space-2) var(--space-4);
+    font-weight: bold;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+  }
+  
+  .send-button:hover {
+    opacity: 0.9;
+  }
+  
+  .send-button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  
+  .expand-button {
+    position: absolute;
+    top: -1.5rem;
+    right: 1rem;
+    background-color: var(--surface-elevated);
+    color: var(--text-secondary);
+    border: 1px solid var(--border-default);
+    border-bottom: none;
+    border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+    padding: var(--space-1) var(--space-3);
+    cursor: pointer;
   }
 </style>

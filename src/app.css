@@ -1,3 +1,28 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Global styles to enforce node appearance */
+.chat-stream {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 960px;
+  margin: 0 auto;
+  padding: var(--space-8);
+}
+
+/* Force correct appearance for user messages */
+.canvas-node.user {
+  align-self: flex-start !important;
+  max-width: 45% !important;
+  margin-right: 55% !important;
+  background-color: var(--surface-elevated) !important;
+}
+
+/* Force correct appearance for AI messages */
+.canvas-node.ai {
+  align-self: flex-end !important;
+  max-width: 100% !important;
+  margin-left: 0 !important;
+}

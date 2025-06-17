@@ -1,233 +1,201 @@
 <script lang="ts">
-  import { fade } from 'svelte/transition';
-  import { updateNode, selectNode, isRefining } from '$lib/stores/workbench';
-  import type { Node } from '$lib/stores/workbench';
+  import { isRefining } from '$lib/stores/workbench';
   import RefinementBubble from './RefinementBubble.svelte';
-  import MagneticButton from './MagneticButton.svelte';
   
-  export let node: Node;
+  export let node;
   export let selected = false;
   
   let showActions = false;
   let menuOpen = false;
   
-  function handleSelect(e: MouseEvent) {
-    selectNode(node.id, e.ctrlKey || e.metaKey);
-  }
-  
-  async function handleRefine() {
-    $isRefining.set(node.id, true);
-    // Trigger refinement API call
-    const response = await fetch('/api/refine', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ 
+  function handleSelect(event) {
+    const selectEvent = new CustomEvent('select', { 
+      detail: { 
         id: node.id, 
-        prompt: node.content 
-      })
+        multiSelect: event.ctrlKey || event.metaKey 
+      } 
     });
-    
-    if (response.ok && response.body) {
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let refinedContent = '';
-      
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        refinedContent += decoder.decode(value);
-        updateNode(node.id, { 
-          refinedContent,
-          status: 'refining' 
-        });
-      }
-      
-      updateNode(node.id, { status: 'refined' });
-    }
-    
-    $isRefining.delete(node.id);
+    dispatchEvent(selectEvent);
   }
   
-  function handleCopy() {
-    navigator.clipboard.writeText(node.content);
-    // Show toast notification
+  function handleRefine() {
+    const refineEvent = new CustomEvent('refine', { 
+      detail: { id: node.id, content: node.content }
+    });
+    dispatchEvent(refineEvent);
   }
 </script>
 
-<div 
-  class="message {node.role} {selected ? 'selected' : ''}"
+<div
+  class="canvas-node" 
+  class:user={node.role === 'user'}
+  class:ai={node.role === 'ai'}
+  class:selected={selected}
   on:mouseenter={() => showActions = true}
   on:mouseleave={() => showActions = false}
   on:click={handleSelect}
-  role="button"
-  aria-label="{node.role === 'user' ? 'User' : 'AI'} message"
+  on:keydown={(e) => e.key === 'Enter' && handleSelect(e)}
   tabindex="0"
+  role="button"
+  aria-pressed={selected}
 >
-  <div class="content">
-    <div class="meta">
-      <span class="role">{node.role === 'user' ? 'You' : 'AI Assistant'}</span>
-      {#if node.timestamp}
-        <time class="timestamp">
-          {new Date(node.timestamp).toLocaleTimeString([], { 
-            hour: '2-digit', 
-            minute: '2-digit' 
-          })}
-        </time>
-      {/if}
-    </div>
-    
-    <div class="text">
-      {#if node.status === 'streaming'}
+  <div class="node-header">
+    <div class="role">{node.role === 'user' ? 'You' : 'AI Assistant'}</div>
+    {#if node.timestamp}
+      <div class="timestamp">
+        {new Date(node.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+      </div>
+    {/if}
+  </div>
+  
+  <div class="node-content">
+    {#if node.status === 'streaming'}
+      <div class="streaming-content">
         {@html node.content}<span class="cursor">|</span>
-      {:else}
+      </div>
+    {:else if node.refinedContent}
+      <div class="content">
+        {@html node.content + node.refinedContent}
+      </div>
+    {:else}
+      <div class="content">
         {@html node.content}
-      {/if}
-    </div>
+      </div>
+    {/if}
   </div>
   
   {#if showActions && node.status === 'complete'}
-    <div class="actions" transition:fade={{ duration: 180 }}>
-      <button 
-        class="action-btn"
-        on:click|stopPropagation={handleCopy}
-        aria-label="Copy message"
-      >
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-          <path d="M4 2a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H4zm0 1h8a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/>
-        </svg>
-      </button>
-      
+    <div class="actions">
       {#if node.role === 'ai' && !node.refinedContent}
-        <MagneticButton 
-          on:click={handleRefine}
-          label="Refine"
-          small
-        />
+        <button 
+          type="button"
+          class="action-button"
+          on:click|stopPropagation={handleRefine}
+          aria-label="Refine response"
+        >
+          Refine
+        </button>
       {/if}
       
       <button 
-        class="action-btn"
+        type="button"
+        class="action-button"
         on:click|stopPropagation={() => menuOpen = !menuOpen}
         aria-label="More actions"
       >
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-          <circle cx="3" cy="8" r="1.5"/>
-          <circle cx="8" cy="8" r="1.5"/>
-          <circle cx="13" cy="8" r="1.5"/>
-        </svg>
+        More
       </button>
     </div>
   {/if}
+  
+  {#if node.refinedContent || $isRefining.has(node.id)}
+    <RefinementBubble 
+      isRefining={$isRefining.has(node.id)}
+      content={node.refinedContent}
+    />
+  {/if}
 </div>
 
-{#if node.refinedContent || $isRefining.has(node.id)}
-  <RefinementBubble 
-    nodeId={node.id}
-    content={node.refinedContent || ''}
-    isRefining={$isRefining.has(node.id)}
-  />
-{/if}
-
 <style>
-  .message {
-    position: relative;
-    max-width: 840px;
-    margin: var(--space-3) auto;
-    padding: var(--space-4) var(--space-5);
-    background: var(--surface-elevated);
-    border: 1px solid var(--border-default);
+  /* Basic node styling */
+  .canvas-node {
+    display: flex;
+    flex-direction: column;
+    padding: var(--space-4);
+    margin-bottom: var(--space-4);
     border-radius: var(--radius-md);
-    font-family: var(--font-body);
-    color: var(--text-primary);
-    transition: all var(--transition-base);
+    background-color: var(--surface-primary);
+    border: 1px solid var(--border-default);
+    transition: all 0.2s ease;
+    cursor: pointer;
+    position: relative;
+    width: 100%;
+    text-align: left;
   }
   
-  .message.user {
-    margin-left: 15%;
-    background: var(--surface-primary);
+  /* Specifically style user nodes - important for width */
+  .canvas-node.user {
+    align-self: flex-start;
+    max-width: 45% !important;
+    margin-right: 55% !important;
+    background-color: var(--surface-elevated);
   }
   
-  .message.ai {
-    margin-right: 15%;
+  /* Style AI nodes */
+  .canvas-node.ai {
+    align-self: flex-end;
+    max-width: 100%;
   }
   
-  .message.selected {
+  /* Selected state */
+  .canvas-node.selected {
     border-color: var(--accent-primary);
-    box-shadow: var(--focus-ring);
+    box-shadow: 0 0 0 1px var(--accent-primary);
   }
   
-  .message:hover {
-    border-color: rgba(185, 189, 193, 0.5);
-  }
-  
-  .meta {
+  /* Header section */
+  .node-header {
     display: flex;
     justify-content: space-between;
-    align-items: center;
     margin-bottom: var(--space-2);
+    color: var(--text-secondary);
+    font-size: 0.875rem;
   }
   
   .role {
-    font-size: 0.875rem;
     font-weight: 500;
-    color: var(--text-secondary);
   }
   
   .timestamp {
-    font-size: 0.75rem;
-    color: var(--text-secondary);
+    opacity: 0.7;
   }
   
-  .text {
-    line-height: 1.6;
-    word-wrap: break-word;
+  /* Content section */
+  .node-content {
+    width: 100%;
+    overflow-wrap: break-word;
+    word-break: break-word;
   }
   
+  .content, .streaming-content {
+    line-height: 1.5;
+    white-space: pre-wrap;
+  }
+  
+  /* Streaming cursor */
   .cursor {
     display: inline-block;
-    width: 2px;
+    width: 1px;
     height: 1.2em;
-    background: var(--accent-primary);
-    animation: pulse 1s steps(2) infinite;
+    background-color: var(--text-primary);
     vertical-align: text-bottom;
-    margin-left: 2px;
+    animation: blink 1s step-end infinite;
   }
   
-  @keyframes pulse {
-    0%, 50% { opacity: 1; }
-    51%, 100% { opacity: 0; }
-  }
-  
+  /* Actions section */
   .actions {
-    position: absolute;
-    top: var(--space-3);
-    right: var(--space-3);
     display: flex;
     gap: var(--space-2);
-    align-items: center;
+    margin-top: var(--space-3);
   }
   
-  .action-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 32px;
-    height: 32px;
-    background: var(--surface-primary);
-    border: 1px solid var(--border-default);
+  .action-button {
+    padding: var(--space-2) var(--space-3);
     border-radius: var(--radius-sm);
+    background-color: var(--surface-secondary);
     color: var(--text-secondary);
+    border: none;
+    font-size: 0.875rem;
     cursor: pointer;
-    transition: all var(--transition-fast);
   }
   
-  .action-btn:hover {
+  .action-button:hover {
+    background-color: var(--accent-primary-transparent);
     color: var(--accent-primary);
-    border-color: var(--accent-primary);
   }
   
-  .action-btn:focus-visible {
-    outline: none;
-    box-shadow: var(--focus-ring);
+  @keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0; }
   }
 </style>
