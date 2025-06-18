@@ -1,45 +1,36 @@
 import { writable, derived, get } from 'svelte/store';
+import { fetchEventSource } from '@microsoft/fetch-event-source';
 import type { Writable } from 'svelte/store';
 
-// Types
+// --- TYPES ---
 export interface Node {
   id: string;
   role: 'user' | 'ai';
   content: string;
   timestamp: number;
-  status?: 'streaming' | 'complete' | 'refining' | 'refined';
-  refinedContent?: string;
+  status?: 'streaming' | 'complete' | 'error';
   selected?: boolean;
-  // Add new field to track pending refinement
-  pendingRefinement?: boolean;
+  wasRefined?: boolean; // Added for potential UI cues
 }
 
-export interface Project {
+export interface Project { // This interface is defined but not yet used.
   id: string;
   name: string;
-  updated: string;
+  updated: string; // Consider Date object or ISO string
   nodes: Node[];
-}
-
-export interface WorkbenchState {
-  nodes: Node[];
-  selectedNodeIds: Set<string>;
-  isThinking: boolean;
-  isRefining: Map<string, boolean>;
-  currentPersona: string;
-  currentProject: string;
-  commandPaletteOpen: boolean;
 }
 
 // Stores
 export const nodes: Writable<Node[]> = writable([]);
 export const selectedNodeIds = writable(new Set<string>());
 export const isThinking = writable(false);
-export const isRefining = writable(new Map<string, boolean>());
 export const currentPersona = writable('default');
-export const currentProject = writable('New Project');
+export const currentProject = writable('New Project'); // Default project title
 export const commandPaletteOpen = writable(false);
 export const composerExpanded = writable(false);
+
+// Client-side extractTextFromChunk is no longer needed for AI response streaming
+// if the server sends plain text. It can be removed if not used elsewhere.
 
 // Derived stores
 export const selectedNodes = derived(
@@ -52,12 +43,11 @@ export const selectedNodes = derived(
 export function addNode(node: Partial<Node>): string {
   const id = crypto.randomUUID();
   const newNode: Node = {
-    id,
-    role: 'user',
-    content: '',
+    id, // ID is always generated
+    role: 'user', // Default role
+    content: '',   // Default content
     timestamp: Date.now(),
     status: 'complete',
-    pendingRefinement: false,
     ...node
   };
   
@@ -87,170 +77,121 @@ export function clearSelection() {
   selectedNodeIds.set(new Set());
 }
 
-// New function to handle the seamless transition between responses
-export async function sendMessageWithRefinement(prompt: string, context: string[] = []) {
-  // Create AI response node that will receive streamed content
-  const nodeId = addNode({
-    role: 'ai',
-    content: '',
-    status: 'streaming',
-  });
-  
+export function sendMessageWithRefinement(prompt: string, context: string[] = []) {
+  const aiNodeId = addNode({ role: 'ai', content: '', status: 'streaming' });
   isThinking.set(true);
-  
-  let refinementController: AbortController | null = null;
-  let refinementPromise: Promise<Response> | null = null;
-  let refinementComplete = false;
-  let initialStreamComplete = false;
-  let originalContent = '';
-  
-  try {
-    // Create abort controllers for both streams
-    const mainController = new AbortController();
-    refinementController = new AbortController();
-    
-    // Start main API call
-    const response = await fetch('/api/chat', {
+
+  let accumulatedText = '';
+  const END_TOKEN = '<<STREAM_END>>';
+  const ctrl = new AbortController();
+  let refinementStartedByEndToken = false; // Flag to track if closure is due to END_TOKEN
+
+  const commonPayload = {
+    prompt,
+    persona: get(currentPersona),
+    context: context.length > 0 ? context : get(selectedNodes).map(n => n.content),
+  };
+
+  const startRefinementStream = (finalTextFromStage1: string) => {
+    fetchEventSource('/api/refine', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ 
-        prompt, 
-        persona: get(currentPersona), 
-        context 
-      }),
-      signal: mainController.signal
-    });
-    
-    if (!response.ok) {
-      throw new Error('Failed to get response');
-    }
-    
-    const reader = response.body?.getReader();
-    if (!reader) throw new Error('No response body');
-    
-    // Start processing the main stream
-    const processMainStream = async () => {
-      const decoder = new TextDecoder();
-      let accumulatedText = '';
-      
-      // Flag to track if we've reached 70% of the expected response
-      let refinementStarted = false;
-      
-      while (true) {
-        const { done, value } = await reader.read();
-        
-        if (done) {
-          initialStreamComplete = true;
-          originalContent = accumulatedText;
-          
-          // If refinement is already complete, apply it immediately
-          if (refinementComplete) {
-            applyRefinement();
-          }
-          
-          break;
+      body: JSON.stringify({ ...commonPayload, prompt: finalTextFromStage1 }),
+      signal: ctrl.signal,
+      onmessage(ev) {
+        console.log('[Refine SSE Received] ev.data:', ev.data);
+        // END_TOKEN is not expected in the refinement stream, but check defensively.
+        if (ev.data === END_TOKEN) {
+            console.warn('[Refine SSE] Received unexpected END_TOKEN.');
+            return;
         }
-        
-        const chunk = decoder.decode(value, { stream: true });
-        accumulatedText += chunk;
-        
-        // Update the node content with the new chunk
-        updateNode(nodeId, { content: accumulatedText });
-        
-        // When we're about 70% through the response, start the refinement
-        // This is a heuristic - adjust based on your API response patterns
-        if (!refinementStarted && accumulatedText.length > 150) {
-          refinementStarted = true;
-          
-          // Proactively start the refinement API call
-          refinementPromise = fetch('/api/refine', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ id: nodeId, prompt: accumulatedText }),
-            signal: refinementController.signal
-          });
+
+        // ev.data is now expected to be plain text from the server
+        const textChunk = ev.data;
+        // console.log('[Refine SSE Plain Text Received]:', textChunk);
+
+        if (textChunk) {
+          accumulatedText += textChunk;
+          // console.log('[Refine SSE Accumulated Text]:', accumulatedText);
+          updateNode(aiNodeId, { content: accumulatedText, wasRefined: true });
         }
+      },
+      onclose() {
+        console.log('[Refine SSE Closed] Finalizing node as complete.');
+        updateNode(aiNodeId, { status: 'complete' });
+        isThinking.set(false);
+      },
+      onerror(err) {
+        console.error('[Refine SSE Error]', err);
+        // Attempt to get more details from the error if it's an FetchEventSourceError
+        let errorMessage = "Refinement failed.";
+        if (err && typeof err === 'object' && 'message' in err) {
+            errorMessage = `Refinement failed: ${err.message}`;
+        }
+        updateNode(aiNodeId, { status: 'error', content: accumulatedText + `\n\n(${errorMessage})` });
+        isThinking.set(false);
+        throw err;
       }
-    };
-    
-    // Process the main stream
-    await processMainStream();
-    
-    // If we haven't started refinement yet (short response), start it now
-    if (!refinementPromise) {
-      refinementPromise = fetch('/api/refine', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: nodeId, prompt: originalContent }),
-        signal: refinementController.signal
-      });
-    }
-    
-    // Now handle the refinement stream
-    const refinementResponse = await refinementPromise;
-    if (!refinementResponse.ok) {
-      throw new Error('Failed to get refinement');
-    }
-    
-    const refinementReader = refinementResponse.body?.getReader();
-    if (!refinementReader) throw new Error('No refinement body');
-    
-    // Function to apply refinement when ready
-    const applyRefinement = () => {
-      // Mark the node as refining
-      updateNode(nodeId, { 
-        status: 'complete',
-        pendingRefinement: false
-      });
-      
+    });
+  };
+  fetchEventSource('/api/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(commonPayload),
+    signal: ctrl.signal,
+    onmessage(ev) {
+      if (ev.data === END_TOKEN) {
+        console.log('[Chat SSE] Received END_TOKEN. Aborting chat stream and starting refinement.');
+        refinementStartedByEndToken = true;
+        ctrl.abort();
+        startRefinementStream(accumulatedText.trim());
+        return;
+      }
+
+      console.log('[Chat SSE Received] ev.data:', ev.data);
+      // ev.data is now expected to be plain text from the server
+      const textChunk = ev.data;
+      // console.log('[Chat SSE Plain Text Received]:', textChunk);
+
+      if (textChunk) {
+        accumulatedText += textChunk;
+        // console.log('[Chat SSE Accumulated Text]:', accumulatedText);
+        updateNode(aiNodeId, { content: accumulatedText });
+      }
+    },
+    onclose() {
+      console.log('[Chat SSE Closed] refinementStartedByEndToken:', refinementStartedByEndToken);
+      if (refinementStartedByEndToken) {
+        // Closure was intentional to start refinement.
+        // The refinement stream's onclose will handle the final status and isThinking.
+        return;
+      }
+
+      // This is a fallback. If the stream closes without sending the END_TOKEN,
+      // we ensure the node is finalized to prevent a stuck UI state.
+      const node = get(nodes).find(n => n.id === aiNodeId);
+      if (node && node.status === 'streaming') {
+        console.log('[Chat SSE Fallback Close] Finalizing node as complete because stream closed before refinement.');
+        updateNode(aiNodeId, { status: 'complete' });
+        isThinking.set(false);
+      } else if (node) {
+        // If node exists but not streaming, it might be complete or error.
+        // Only set isThinking to false if it wasn't an error that already did so.
+        if (node.status !== 'error') {
+            isThinking.set(false);
+        }
+        console.log('[Chat SSE Fallback Close] Node status is already:', node.status);
+      }
+    },
+    onerror(err) {
+      console.error('[Chat SSE Error]', err);
+      let errorMessage = "An error occurred.";
+        if (err && typeof err === 'object' && 'message' in err) {
+            errorMessage = `An error occurred: ${err.message}`;
+        }
+      updateNode(aiNodeId, { status: 'error', content: accumulatedText + `\n\n${errorMessage}` });
       isThinking.set(false);
-    };
-    
-    // Process refinement stream
-    const processRefinementStream = async () => {
-      const decoder = new TextDecoder();
-      let refinedText = '';
-      
-      // Update node to indicate refinement is happening but don't show yet
-      updateNode(nodeId, { pendingRefinement: true });
-      
-      while (true) {
-        const { done, value } = await refinementReader.read();
-        
-        if (done) {
-          refinementComplete = true;
-          
-          // If main stream is already complete, apply refinement
-          if (initialStreamComplete) {
-            applyRefinement();
-          }
-          
-          break;
-        }
-        
-        const chunk = decoder.decode(value, { stream: true });
-        refinedText += chunk;
-        
-        // Store the refinement but don't display it yet
-        updateNode(nodeId, { refinedContent: refinedText });
-      }
-    };
-    
-    // Process refinement
-    await processRefinementStream();
-    
-  } catch (error) {
-    console.error('Error in message with refinement:', error);
-    updateNode(nodeId, { 
-      content: originalContent || 'An error occurred while generating the response.',
-      status: 'complete',
-      pendingRefinement: false
-    });
-    isThinking.set(false);
-  } finally {
-    // Clean up
-    if (refinementController) {
-      refinementController.abort();
+      throw err;
     }
-  }
+  });
 }

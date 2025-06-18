@@ -1,50 +1,74 @@
-// Design Tokens for LLM Workbench v4.1
-
-// Color Primitives
-$abyss-black: #000000;
-$obsidian: #121212;
-$graphite: #2A2A2A;
-$titanium: #B9BDC1;
-$electric-teal: #00FFC2;
-$violet-aura: #9F4DFF;
-$midnight-gradient-stop: #070718;
-$error-red: #FF4444;
-
-// Semantic Tokens
+/* tokens.scss */
 :root {
-  --surface-primary: #{$obsidian};
-  --surface-elevated: #{$graphite};
-  --border-default: #{$titanium};
-  --accent-primary: #{$electric-teal};
-  --accent-glow: #{$violet-aura};
-  --text-primary: #{$titanium};
-  --text-secondary: rgba(185, 189, 193, 0.7);
+  /* 4 · Look & Vibe — Visual DNA */
 
-  // Typography
-  --font-heading: 'IBM Plex Sans', system-ui, sans-serif;
-  --font-body: 'Inter', system-ui, sans-serif;
+  /* Palette */
+  --color-abyss-black: #000000;
+  --color-midnight-sky-end: #070718;
+  --color-obsidian: #121212;
+  --color-graphite: #2a2a2a;
+  --color-titanium: #b9bdc1;
+  --color-text-primary: #e0e0e0;
+  --color-text-secondary: #a0a0a0;
+  --color-brand-teal: #00ffc2;
+  --color-brand-violet-aura: #9f4dff;
+  --color-danger: #ff4d4d;
 
-  // Spacing (4pt grid)
-  --space-1: 4px;
-  --space-2: 8px;
-  --space-3: 12px;
-  --space-4: 16px;
-  --space-5: 20px;
-  --space-6: 24px;
-  --space-8: 32px;
-  --space-16: 64px;
+  /* Typography */
+  --font-heading: 'IBM Plex Sans', sans-serif;
+  --font-body: 'Inter', sans-serif;
 
-  // Radii
-  --radius-sm: 8px;
-  --radius-md: 12px;
+  /* Modular Scale (1.25 ratio) */
+  --font-size-sm: 0.8rem;   /* 12.8px */
+  --font-size-base: 1rem;   /* 16px */
+  --font-size-md: 1.25rem;  /* 20px */
+  --font-size-lg: 1.563rem; /* 25px */
+  --font-size-xl: 1.953rem; /* 31.25px */
+  --font-size-xxl: 2.441rem;/* 39px */
 
-  // Effects
-  --glass-blur: blur(4px);
-  --aura-glow: 0 0 12px rgba(159, 77, 255, 0.06);
-  --focus-ring: 0 0 0 2px #{$electric-teal};
+  /* Font Weights */
+  --font-light: 300;
+  --font-regular: 400;
+  --font-medium: 500;
+  --font-semibold: 600;
 
-  // Transitions
-  --transition-fast: 180ms cubic-bezier(0.4, 0, 0.2, 1);
-  --transition-base: 280ms cubic-bezier(0.4, 0, 0.2, 1);
-  --transition-slow: 400ms cubic-bezier(0.4, 0, 0.2, 1);
+  /* 4-pt Spacing Grid */
+  --space-1: 0.25rem; /* 4px */
+  --space-2: 0.5rem;  /* 8px */
+  --space-3: 0.75rem; /* 12px */
+  --space-4: 1rem;    /* 16px */
+  --space-5: 1.25rem; /* 20px */
+  --space-6: 1.5rem;  /* 24px */
+  --space-8: 2rem;    /* 32px */
+  --space-10: 2.5rem; /* 40px */
+  --space-12: 3rem;   /* 48px */
+  --space-16: 4rem;   /* 64px */
+
+  /* Corner Radii */
+  --radius-sm: 4px;
+  --radius-md: 8px;  /* Panels */
+  --radius-lg: 12px; /* Bubbles */
+  --radius-full: 9999px;
+
+  /* Borders */
+  --border-width: 1px;
+  --border-base: var(--border-width) solid var(--color-titanium);
+
+  /* Transitions & Motion */
+  --transition-short: 120ms;
+  --transition-base: 180ms;
+  --transition-long: 400ms;
+  --ease-out: cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  /* Glass Effect */
+  --blur-glass: 4px;
+
+  /* Layout Dimensions */
+  --top-bar-height: 64px;
+  --left-rail-width: 56px;
+  --sidebar-width: 300px;
+  --composer-height-idle: 72px;
+  --composer-height-expanded: 160px;
+  --chat-stream-max-width: 840px;
 }

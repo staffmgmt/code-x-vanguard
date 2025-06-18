@@ -1,199 +1,157 @@
-<script>
-  // Fixed import - using existing store instead of missing ui store
-  import { writable } from 'svelte/store';
-  
-  // Create local commandPaletteOpen store if not available in your project
-  const commandPaletteOpen = writable(false);
-  
-  // Expose a method to open the command palette
-  export function open() {
-    commandPaletteOpen.set(true);
+<!-- CommandPalette.svelte -->
+<script lang="ts">
+  import { createEventDispatcher, onMount } from 'svelte';
+
+  const dispatch = createEventDispatcher();
+  let inputElement: HTMLInputElement;
+
+  function close() {
+    dispatch('close');
   }
-  
-  let searchQuery = '';
-  let commands = [
-    { id: 'new', name: 'New Chat', icon: '📝' },
-    { id: 'clear', name: 'Clear Chat', icon: '🧹' },
-    { id: 'settings', name: 'Settings', icon: '⚙️' },
-    { id: 'help', name: 'Help', icon: '❓' }
-  ];
-  let filteredCommands = commands;
-  let selectedIndex = 0;
-  
-  $: {
-    if (searchQuery) {
-      filteredCommands = commands.filter(cmd => 
-        cmd.name.toLowerCase().includes(searchQuery.toLowerCase())
-      );
-    } else {
-      filteredCommands = commands;
+
+  onMount(() => {
+    if (inputElement) {
+      inputElement.focus();
     }
-    selectedIndex = 0;
-  }
-  
-  function handleKeyDown(e) {
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      selectedIndex = (selectedIndex + 1) % filteredCommands.length;
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      selectedIndex = selectedIndex === 0 
-        ? filteredCommands.length - 1 
-        : selectedIndex - 1;
-    } else if (e.key === 'Enter' && filteredCommands.length > 0) {
-      executeCommand(filteredCommands[selectedIndex].id);
-    } else if (e.key === 'Escape') {
-      commandPaletteOpen.set(false);
-    }
-  }
-  
-  function executeCommand(id) {
-    // Command execution logic
-    console.log(`Executing command: ${id}`);
-    commandPaletteOpen.set(false);
+  });
+
+  // Placeholder for command execution
+  function executeCommand(command: string) {
+    console.log('Executing command:', command);
+    close();
   }
 </script>
 
-{#if $commandPaletteOpen}
-  <div 
-    class="command-palette-container"
-    role="dialog"
-    aria-label="Command palette"
-  >
-    <button 
-      class="overlay"
-      on:click={() => commandPaletteOpen.set(false)}
-      aria-label="Close command palette"
-    ></button>
-    
-    <div 
-      class="command-palette"
-    >
-      <!-- svelte-ignore a11y_autofocus -->
-      <input
-        type="text"
-        placeholder="Type a command..."
-        bind:value={searchQuery}
-        autofocus
-        on:keydown={handleKeyDown}
-        aria-controls="command-list"
-      />
-      
-      <ul id="command-list" class="command-list" role="listbox">
-        {#if filteredCommands.length === 0}
-          <li class="no-results">No commands found</li>
-        {:else}
-          {#each filteredCommands as command, i}
-            <li 
-              class="command-item" 
-              class:selected={i === selectedIndex}
-              role="option"
-              aria-selected={i === selectedIndex}
-            >
-              <button 
-                on:click={() => executeCommand(command.id)}
-                class="command-button"
-              >
-                <span class="command-icon">{command.icon}</span>
-                <span class="command-name">{command.name}</span>
-              </button>
-            </li>
-          {/each}
-        {/if}
-      </ul>
+<div class="scrim" on:click={close} role="presentation" on:keydown|self={(e) => e.key === 'Escape' && close()}>
+  <div class="palette" on:click|stopPropagation role="dialog" aria-modal="true" aria-labelledby="command-palette-label">
+    <h2 id="command-palette-label" class="sr-only">Command Palette</h2>
+    <input 
+      bind:this={inputElement}
+      type="text" 
+      placeholder="Enter a command or search..." 
+      aria-label="Command input"
+    />
+    <div class="results" role="listbox">
+      <!-- Placeholder for command results -->
+      <button type="button" class="result-item" role="option" aria-selected="false" on:click={() => executeCommand('new_chat')}>
+        <span class="icon">📄</span>
+        <span class="text">New Chat</span>
+        <span class="shortcut">Ctrl+N</span>
+      </button>
+      <button type="button" class="result-item" role="option" aria-selected="false" on:click={() => executeCommand('settings')}>
+        <span class="icon">⚙️</span>
+        <span class="text">Settings</span>
+        <span class="shortcut">Ctrl+,</span>
+      </button>
+      <!-- Add more commands as needed -->
     </div>
   </div>
-{/if}
+</div>
 
-<style>
-  .command-palette-container {
+<style lang="scss">
+  .sr-only { /* Screen-reader only class */
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border-width: 0;
+  }
+
+  .scrim {
     position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
+    inset: 0;
+    background-color: rgba(var(--rgb-abyss-black), 0.6); /* Slightly darker scrim */
+    backdrop-filter: blur(var(--blur-sm)); /* Subtle blur for scrim */
+    z-index: 50;
     display: flex;
     justify-content: center;
-    align-items: flex-start;
-    padding-top: 10vh;
-    z-index: 1000;
+    padding-top: 15vh;
   }
-  
-  .overlay {
-    position: absolute;
-    top: 0;
-    left: 0;
+
+  .palette {
     width: 100%;
-    height: 100%;
-    background-color: rgba(0, 0, 0, 0.5);
-    backdrop-filter: blur(3px);
-    border: none;
-    margin: 0;
-    padding: 0;
-    cursor: pointer;
-  }
-  
-  .command-palette {
-    position: relative;
-    width: 100%;
-    max-width: 600px;
-    background-color: var(--surface-elevated);
-    border-radius: var(--radius-lg);
+    max-width: 400px; /* Spec: 400px wide */
+    height: fit-content;
+    max-height: 70vh; /* Max height to prevent overflow on small screens */
+    background-color: rgba(var(--rgb-obsidian), 0.85); /* Glass card effect, slightly more opaque */
+    border: var(--border-base);
+    border-radius: var(--radius-md); /* Spec: 8px on panels/cards, assuming --radius-md = 8px */
+    backdrop-filter: blur(var(--blur-glass)); /* Assuming --blur-glass = 4px or similar for 4% blur */
     box-shadow: var(--shadow-lg);
-    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden; /* Ensure children conform to border radius */
   }
-  
+
   input {
     width: 100%;
     padding: var(--space-4);
-    background-color: var(--surface-primary);
-    color: var(--text-primary);
+    background: transparent;
     border: none;
-    border-bottom: 1px solid var(--border-default);
-    font-size: 1rem;
-  }
-  
-  input:focus {
+    border-bottom: var(--border-base);
+    color: var(--color-text-primary);
+    font-family: var(--font-body);
+    font-size: var(--font-size-md); /* Slightly smaller for better fit */
     outline: none;
+
+    &::placeholder {
+      color: var(--color-text-secondary);
+    }
   }
-  
-  .command-list {
-    max-height: 300px;
+
+  .results {
+    padding: var(--space-2);
     overflow-y: auto;
-    margin: 0;
-    padding: 0;
-    list-style: none;
+    max-height: calc(70vh - 60px); /* Adjust based on input height */
   }
-  
-  .command-item {
-    padding: 0;
-    margin: 0;
-  }
-  
-  .command-button {
-    display: flex;
-    align-items: center;
-    width: 100%;
-    padding: var(--space-3) var(--space-4);
+
+  .result-item {
+    /* Reset button styles */
     background: none;
     border: none;
-    text-align: left;
+    font: inherit;
+    color: inherit;
     cursor: pointer;
-    color: var(--text-primary);
+    text-align: left;
+    width: 100%;
+
+    display: flex;
+    align-items: center;
+    padding: var(--space-3);
+    border-radius: var(--radius-md); /* Consistent radius */
+    transition: background-color var(--transition-duration-base) var(--ease-out-quad);
+    color: var(--color-text-secondary); /* Default text color for items */
+
+    &:hover, &:focus-visible {
+      background-color: var(--color-graphite);
+      color: var(--color-text-primary);
+      outline: none; /* Custom focus handled by hover style */
+    }
+    &:focus-visible { /* Explicit focus style for keyboard nav */
+        background-color: var(--color-graphite);
+        outline: var(--focus-ring-width) solid var(--focus-ring-color);
+        outline-offset: calc(-1 * var(--focus-ring-width)); /* Inset focus ring */
+    }
   }
-  
-  .command-item.selected .command-button {
-    background-color: var(--accent-primary-transparent);
-  }
-  
-  .command-icon {
+
+  .icon {
     margin-right: var(--space-3);
-    font-size: 1.2rem;
+    font-size: var(--font-size-md); /* Ensure icon size is reasonable */
   }
-  
-  .no-results {
-    padding: var(--space-4);
-    color: var(--text-secondary);
-    text-align: center;
+
+  .text {
+    flex-grow: 1;
+    font-family: var(--font-body);
+    font-size: var(--font-size-base);
+  }
+
+  .shortcut {
+    font-size: var(--font-size-sm);
+    color: var(--color-text-tertiary);
+    font-family: var(--font-body);
   }
 </style>

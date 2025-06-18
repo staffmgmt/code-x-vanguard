@@ -1,111 +1,71 @@
+<!-- MagneticButton.svelte -->
 <script lang="ts">
-  import { onMount } from 'svelte';
-  
-  export let label: string;
-  export let primary = false;
-  export let small = false;
-  
-  let button: HTMLButtonElement;
-  let isKeyboard = false;
-  
-  function handleMouseMove(e: MouseEvent) {
-    if (isKeyboard) return;
-    
-    const rect = button.getBoundingClientRect();
-    const centerX = rect.left + rect.width / 2;
-    const centerY = rect.top + rect.height / 2;
-    const deltaX = e.clientX - centerX;
-    const deltaY = e.clientY - centerY;
-    const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
-    
-    if (distance < 60) {
-      const factor = (60 - distance) / 60;
-      const moveX = (deltaX / distance) * 4 * factor;
-      const moveY = (deltaY / distance) * 4 * factor;
-      button.style.setProperty('--mx', `${moveX}px`);
-      button.style.setProperty('--my', `${moveY}px`);
-    } else {
-      button.style.setProperty('--mx', '0');
-      button.style.setProperty('--my', '0');
+  import { spring } from 'svelte/motion';
+  import type { Spring } from 'svelte/motion';
+
+  // Allow passthrough of class and other props
+  // The 'class' prop will be accessed via $$props.class in the template
+  export let type: 'button' | 'submit' | 'reset' = 'button'; // Accept the 'type' prop
+  export let ariaLabel: string | undefined = undefined; // Accept aria-label
+  export let title: string | undefined = undefined; // Accept title
+
+
+  let element: HTMLButtonElement;
+
+  // Spring store for smooth x/y translations
+  const position: Spring<{ x: number; y: number }> = spring(
+    { x: 0, y: 0 },
+    {
+      stiffness: 0.1,
+      damping: 0.25,
+      precision: 0.01
     }
-  }
-  
-  function handleMouseLeave() {
-    button.style.setProperty('--mx', '0');
-    button.style.setProperty('--my', '0');
-  }
-  
-  onMount(() => {
-    // Detect keyboard navigation
-    window.addEventListener('keydown', () => isKeyboard = true);
-    window.addEventListener('mousedown', () => isKeyboard = false);
-  });
+  );
+
+  const handleMouseMove = (event: MouseEvent) => {
+    if (!element) return;
+    const { clientX, clientY } = event;
+    const { left, top, width, height } = element.getBoundingClientRect();
+    
+    const x = clientX - (left + width / 2);
+    const y = clientY - (top + height / 2);
+
+    // Cap the movement to a max of 4px as per spec
+    const maxMove = 4;
+    position.set({
+      x: Math.max(-maxMove, Math.min(maxMove, x * 0.1)),
+      y: Math.max(-maxMove, Math.min(maxMove, y * 0.1))
+    });
+  };
+
+  const handleMouseLeave = () => {
+    position.set({ x: 0, y: 0 });
+  };
 </script>
 
 <button
-  bind:this={button}
-  class="magnetic-btn {primary ? 'primary' : ''} {small ? 'small' : ''}"
+  bind:this={element}
+  class={$$props.class || ''}
+  type={type}
   on:mousemove={handleMouseMove}
   on:mouseleave={handleMouseLeave}
   on:click
-  data-magnetic
+  aria-label={ariaLabel}
+  title={title}
+  style="transform: translate({$position.x}px, {$position.y}px);"
 >
-  <span class="label">{label}</span>
-  {#if primary}
-    <span class="aura" aria-hidden="true"></span>
-  {/if}
+  <slot />
 </button>
 
-<style>
-  .magnetic-btn {
-    position: relative;
-    padding: var(--space-3) var(--space-6);
-    background: var(--surface-primary);
-    border: 1px solid var(--border-default);
-    border-radius: var(--radius-sm);
-    font-family: var(--font-body);
-    font-weight: 500;
-    color: var(--text-primary);
+<style lang="scss">
+  button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
     cursor: pointer;
-    transform: translate(var(--mx, 0), var(--my, 0));
-    transition: all var(--transition-base);
-  }
-  
-  .magnetic-btn.small {
-    padding: var(--space-2) var(--space-4);
-    font-size: 0.875rem;
-  }
-  
-  .magnetic-btn.primary {
-    color: var(--accent-primary);
-    font-weight: 600;
-  }
-  
-  .magnetic-btn:hover {
-    border-color: var(--accent-primary);
-  }
-  
-  .magnetic-btn:focus-visible {
-    outline: none;
-    box-shadow: var(--focus-ring);
-  }
-  
-  .aura {
-    position: absolute;
-    inset: -8px;
-    background: radial-gradient(circle, var(--accent-glow) 0%, transparent 70%);
-    opacity: 0;
-    filter: blur(16px);
-    transition: opacity var(--transition-slow);
-    z-index: -1;
-    pointer-events: none;
-  }
-  
-  .magnetic-btn:hover .aura {
-    opacity: 0.3;
-  }
-  
-  [data-magnetic] {
-    will-change: transform;
+    background: transparent;
+    /* transition for other properties (like background, color) can be added by parent */
+    will-change: transform; /* Performance hint for the browser */
   }
 </style>

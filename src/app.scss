@@ -1,76 +1,213 @@
-@use '$lib/styles/tokens' as *;
+/* src/app.scss */
 
-// Reset
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
+// Import Fonts (Design Spec 4: IBM Plex Sans & Inter)
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600&display=swap');
+
+:root {
+  // Palette (Design Spec 4)
+  --color-abyss-black: #000000;
+  --rgb-abyss-black: 0, 0, 0;
+
+  --color-midnight-sky-end: #070718; // For gradient in Starfield
+  --rgb-midnight-sky-end: 7, 7, 24;
+
+  --color-obsidian: #121212; // Panels
+  --rgb-obsidian: 18, 18, 18;
+
+  --color-graphite: #2A2A2A; // Cards
+  --rgb-graphite: 42, 42, 42;
+
+  --color-titanium: #B9BDC1; // Borders
+  --rgb-titanium: 185, 189, 193;
+
+  --color-electric-teal: #00FFC2; // Accents (≤ 10%), Focus Rings
+  --rgb-electric-teal: 0, 255, 194;
+
+  --color-violet-aura: #9F4DFF; // ONLY as soft radial behind primary CTA
+  --rgb-violet-aura: 159, 77, 255;
+
+  // Text Colors (Derived for good contrast on dark backgrounds)
+  --color-text-primary: #E0E0E0;   // Main text
+  --color-text-secondary: #A0A0A0; // Subdued text, placeholders
+  --color-text-tertiary: #707070;  // Hint text, disabled
+  --color-text-accent: var(--color-electric-teal);
+  --color-text-on-accent: var(--color-abyss-black); // Text on teal buttons
+
+  // Semantic Colors
+  --color-danger: #FF4D4D; // Errors
+  --rgb-danger: 255, 77, 77;
+
+  // Borders (Design Spec 4 & 5)
+  --border-width: 1px;
+  --border-color-default: var(--color-titanium);
+  --border-base: var(--border-width) solid var(--border-color-default);
+  --border-accent: var(--border-width) solid var(--color-electric-teal);
+
+  // Radii (Design Spec 4)
+  --radius-xs: 2px;  // Micro elements
+  --radius-sm: 4px;  // Small UI elements, inline items, focus ring
+  --radius-md: 8px;  // Panels, cards (e.g., Command Palette, Sidebar)
+  --radius-lg: 12px; // Bubbles (CanvasNode)
+  --radius-xl: 16px; // Larger containers if needed
+  --radius-full: 9999px; // For circular elements, scrollbar thumb
+
+  // Spacing (Design Spec 4 - strict 4-pt grid)
+  --space-unit: 4px;
+  --space-1: calc(1 * var(--space-unit));  // 4px
+  --space-2: calc(2 * var(--space-unit));  // 8px
+  --space-3: calc(3 * var(--space-unit));  // 12px
+  --space-4: calc(4 * var(--space-unit));  // 16px
+  --space-5: calc(5 * var(--space-unit));  // 20px
+  --space-6: calc(6 * var(--space-unit));  // 24px
+  --space-7: calc(7 * var(--space-unit));  // 28px
+  --space-8: calc(8 * var(--space-unit));  // 32px
+  --space-10: calc(10 * var(--space-unit)); // 40px
+  --space-12: calc(12 * var(--space-unit)); // 48px
+  --space-16: calc(16 * var(--space-unit)); // 64px
+
+  // Typography (Design Spec 4)
+  --font-heading: 'IBM Plex Sans', sans-serif;
+  --font-body: 'Inter', sans-serif;
+
+  // Font Weights (Design Spec 4: 300-600)
+  --font-light: 300;
+  --font-regular: 400;
+  --font-medium: 500;
+  --font-semibold: 600;
+
+  // Modular Font Scale (Base 16px, Ratio 1.25 - Design Spec 4)
+  --font-size-xs: 0.64rem;   // ~10.24px
+  --font-size-sm: 0.8rem;    // ~12.8px
+  --font-size-base: 1rem;    // 16px (body text)
+  --font-size-md: 1.25rem;   // 20px (e.g., project title, H3)
+  --font-size-lg: 1.563rem;  // ~25px (e.g., H2)
+  --font-size-xl: 1.953rem;  // ~31.25px (e.g., H1)
+  --font-size-xxl: 2.441rem; // ~39px
+
+  // Line Heights
+  --line-height-tight: 1.25;
+  --line-height-base: 1.6; // For body copy
+  --line-height-heading: 1.3;
+
+  // Motion & Transitions (Design Spec 5 & 8)
+  --transition-duration-short: 120ms; // Micro-interactions, dropdowns
+  --transition-duration-base: 200ms;  // Standard component transitions
+  --transition-duration-medium: 280ms; // Blink ramp
+  --transition-duration-long: 400ms;  // Sidebar, composer expand, palette open (max)
+  --ease-out-quad: cubic-bezier(0.25, 0.46, 0.45, 0.94); // General purpose ease
+  --ease-in-out-quad: cubic-bezier(0.455, 0.03, 0.515, 0.955);
+  --ease-spring-1: cubic-bezier(0.34, 1.56, 0.64, 1); // Example spring
+
+  // UI Element Dimensions (Design Spec 6)
+  --top-bar-height: 64px;
+  --left-rail-width: 56px;
+  --sidebar-width: 300px;
+  --composer-height-idle: 72px;
+  --composer-height-expanded: 160px;
+  --chat-stream-max-width: 840px;
+  --toast-inset: 24px;
+
+  // Effects (Design Spec 4, 6, 7)
+  --blur-glass: 4px; // For glass cards/panels
+  --blur-sm: 2px;
+  --aura-glow-violet: 0 0 24px 6px rgba(var(--rgb-violet-aura), 0.15); // Softer, as per spec "soft radial"
+  --aura-glow-violet-refined: 0 0 18px 4px rgba(var(--rgb-violet-aura), 0.1); // For refined bubble
+
+  // Shadows (Subtle, as per "Intelligent Minimalism")
+  --shadow-sm: 0 2px 4px rgba(var(--rgb-abyss-black), 0.1);
+  --shadow-md: 0 4px 8px rgba(var(--rgb-abyss-black), 0.15);
+  --shadow-lg: 0 10px 20px rgba(var(--rgb-abyss-black), 0.2);
+
+  // Accessibility (Design Spec 5)
+  --focus-ring-color: var(--color-electric-teal); // Teal focus rings
+  --focus-ring-width: 2px;
+  --focus-ring-offset: 2px;
 }
 
-// Base
-html {
-  font-size: 16px;
+/* Reset and Base Styles */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  /* Base background color; Starfield.svelte provides the detailed gradient and stars */
+  background-color: var(--color-abyss-black); 
+
+  color: var(--color-text-primary);
+  font-family: var(--font-body);
+  font-weight: var(--font-regular);
+  font-size: var(--font-size-base);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-body {
-  font-family: var(--font-body);
-  color: var(--text-primary);
-  background: var(--abyss-black);
-  overflow-x: hidden;
-}
-
-// Typography
+/* Headings */
 h1, h2, h3, h4, h5, h6 {
   font-family: var(--font-heading);
-  font-weight: 500;
-  line-height: 1.2;
+  font-weight: var(--font-semibold);
+  line-height: var(--line-height-heading);
+  color: var(--color-text-primary);
+  margin-top: var(--space-6); /* Example spacing */
+  margin-bottom: var(--space-3); /* Example spacing */
+}
+h1 { font-size: var(--font-size-xl); }
+h2 { font-size: var(--font-size-lg); }
+h3 { font-size: var(--font-size-md); }
+/* Define other heading sizes as needed */
+
+/* Global Layout Styles */
+.workspace {
+  padding-top: var(--top-bar-height);
+  margin-left: var(--left-rail-width);
+  padding-bottom: var(--composer-height-idle); /* Space for idle Composer */
+  min-height: 100vh;
+  transition: margin-left var(--transition-long) var(--ease-out);
 }
 
-// Code blocks
-pre, code {
-  font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace;
+.workspace.sidebar-open {
+  margin-left: calc(var(--left-rail-width) + var(--sidebar-width));
 }
 
-pre {
-  background: var(--surface-primary);
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-sm);
-  padding: var(--space-4);
-  overflow-x: auto;
-}
-
-// Focus styles
+/* Accessibility Focus Ring */
 :focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
+  border-radius: var(--radius-sm);
 }
 
-// Scrollbar
+/* Scrollbar Styling */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 
 ::-webkit-scrollbar-track {
-  background: var(--surface-primary);
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--border-default);
-  border-radius: 4px;
+  background: var(--color-graphite);
+  border-radius: var(--radius-full);
+  border: 2px solid transparent;
+  background-clip: content-box;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--accent-primary);
+  background: var(--color-titanium);
+  background-clip: content-box;
 }
 
-// Animations
-@media (prefers-reduced-motion: reduce) {
-  * {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-  }
-}
+// Tailwind base, components, and utilities
+// Ensure Tailwind is configured to use these CSS variables.
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
