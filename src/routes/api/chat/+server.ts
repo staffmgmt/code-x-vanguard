@@ -54,24 +54,18 @@ export const POST: RequestHandler = async ({ request }) => {
                 // Server-side helper to extract text from a parsed Gemini API stream object
                 function extractTextFromServerObject(parsedObject: any): string | null {
                     try {
-                        if (
-                            parsedObject &&
-                            parsedObject.candidates &&
-                            Array.isArray(parsedObject.candidates) &&
-                            parsedObject.candidates.length > 0 &&
-                            parsedObject.candidates[0].content &&
-                            parsedObject.candidates[0].content.parts &&
-                            Array.isArray(parsedObject.candidates[0].content.parts) &&
-                            parsedObject.candidates[0].content.parts.length > 0 &&
-                            typeof parsedObject.candidates[0].content.parts[0].text === 'string'
-                        ) {
-                            return parsedObject.candidates[0].content.parts[0].text;
-                        }
-                        // Log if text extraction returns null
-                        // console.warn('[CHAT SERVER] extractTextFromServerObject returned null for object:', JSON.stringify(parsedObject).substring(0, 200) + "...");
+                        // More robust extraction:
+                        const candidate = parsedObject?.candidates?.[0] || parsedObject;
+                        const text = candidate?.content?.parts?.[0]?.text;
 
+                        if (typeof text === 'string') {
+                            return text;
+                        }
+                        console.warn('[CHAT SERVER] extractTextFromServerObject: Text not found or not a string. Object snippet:', JSON.stringify(parsedObject).substring(0, 200));
+                        return null;
                     } catch (error) {
-                        console.error('[CHAT SERVER] Error extracting text from server object:', error, parsedObject);
+                         const objectSnippet = typeof parsedObject === 'object' ? JSON.stringify(parsedObject).substring(0,200) : String(parsedObject).substring(0,200);
+                        console.error('[CHAT SERVER] Error extracting text from server object:', error, 'Object snippet:', objectSnippet);
                     }
                     return null;
                 }
@@ -79,16 +73,13 @@ export const POST: RequestHandler = async ({ request }) => {
                 function processBuffer() {
                     let i = 0;
                     while (i < buffer.length) {
-                        // Server-side detailed log for each character - UNCOMMENT FOR DEEP DEBUGGING
-                        // console.log(`[CHAT SERVER] processBuffer char='${buffer[i]}', i=${i}, braceDepth=${braceDepth}, inString=${inString}, objectStartIndex=${objectStartIndex}, bufferLen=${buffer.length}, bufferSnip='${buffer.substring(0,50)}'`);
-
                         const char = buffer[i];
+                        // Verbose per-character logging (jsonStructureType removed from log):
+                        console.log(`[CHAT SERVER DEBUG] char='${char.replace(/\n/g, "\\n")}', i=${i}, braceDepth=${braceDepth}, inString=${inString}, objectStartIndex=${objectStartIndex}, buffer='${buffer.substring(0,50).replace(/\n/g, "\\n")}'`);
 
-                        // Revised inString logic to correctly handle escaped quotes
                         if (char === '"') {
                             let isEscaped = false;
                             if (i > 0 && buffer[i - 1] === '\\') {
-                                // Count preceding backslashes to handle cases like \\" (escaped backslash then quote)
                                 let backslashCount = 0;
                                 for (let k = i - 1; k >= 0; k--) {
                                     if (buffer[k] === '\\') {
@@ -97,74 +88,79 @@ export const POST: RequestHandler = async ({ request }) => {
                                         break;
                                     }
                                 }
-                                if (backslashCount % 2 === 1) { // Odd number of backslashes means the quote is escaped
+                                if (backslashCount % 2 === 1) {
                                     isEscaped = true;
                                 }
                             }
                             if (!isEscaped) {
                                 inString = !inString;
+                                console.log(`[CHAT SERVER DEBUG] inString toggled to: ${inString} at char '${char}' (i=${i})`);
                             }
                         }
 
                         if (objectStartIndex === -1) { // Not currently inside an object
-                            // Only start a new object if we are not currently inside a string
-                            // and we encounter an opening brace.
-                            if (!inString && char === '{') {
+                            if (!inString && char === '{') { // Only look for '{' to start an object
                                 objectStartIndex = i;
                                 braceDepth = 1;
+                                console.log(`[CHAT SERVER DEBUG] Object start detected. braceDepth: ${braceDepth}, objectStartIndex: ${objectStartIndex} at char '{' (i=${i})`);
                             }
                         } else { // Currently inside a potential object
-                            // Only count braces if we are not inside a string.
                             if (!inString) { 
                                 if (char === '{') {
                                     braceDepth++;
-                                } else if (char === '}') {
-                                    if (objectStartIndex === -1) { // Should not be decrementing if not tracking an object
-                                        // console.warn(`[CHAT SERVER] processBuffer: Decrementing braceDepth for '}' but not tracking an object. Char: '${char}', i: ${i}, buffer: '${buffer.substring(0,50)}'`);
-                                        // This might indicate an issue or just an extra '}' outside any object in the stream
-                                        i++; continue; // Skip this char and continue
-                                    }
+                                    console.log(`[CHAT SERVER DEBUG] braceDepth incremented to: ${braceDepth} at char '${char}' (i=${i})`);
+                                } else if (char === '}') { 
+                                    // Removed the 'if (objectStartIndex === -1)' check here.
+                                    // If we are in this branch, an object is being tracked.
                                     braceDepth--;
+                                    console.log(`[CHAT SERVER DEBUG] braceDepth decremented to: ${braceDepth} at char '${char}' (i=${i})`);
                                     if (braceDepth === 0) {
+                                        // Found the end of an object {}
                                         const jsonObjectStr = buffer.substring(objectStartIndex, i + 1);
+                                        console.log(`[CHAT SERVER] processBuffer: Complete JSON object found. Snippet:`, jsonObjectStr.substring(0, 200));
                                         try {
-                                            const parsedObject = JSON.parse(jsonObjectStr); // Parse the complete object
+                                            const parsedObject = JSON.parse(jsonObjectStr);
+                                            console.log('[CHAT SERVER] processBuffer: Successfully parsed JSON object. Snippet:', JSON.stringify(parsedObject).substring(0,200));
                                             const textChunk = extractTextFromServerObject(parsedObject);
                                             if (textChunk) {
                                                 controller.enqueue(encoder.encode(`data: ${textChunk}\n\n`));
-                                                console.log('[CHAT SERVER] processBuffer: Enqueued text chunk - snippet:', textChunk.substring(0, 70));
+                                                console.log('[CHAT SERVER] processBuffer: Enqueued text chunk from object. Snippet:', textChunk.substring(0, 70));
                                             } else {
-                                                // Optional: log if a valid JSON object was received but no text extracted
-                                                console.warn('[CHAT SERVER] processBuffer: No text extracted from valid JSON - snippet:', jsonObjectStr.substring(0, 200));
+                                                 console.warn('[CHAT SERVER] processBuffer: extractTextFromServerObject returned null/empty for object. JSON snippet:', jsonObjectStr.substring(0, 200));
                                             }
                                         } catch (e) {
-                                            // This catch handles errors from JSON.parse(jsonObjectStr)
                                             const error = e as Error;
-                                            console.warn('[CHAT SERVER] processBuffer: Discarding invalid JSON segment due to parse error. Segment snippet:', jsonObjectStr.substring(0,200), 'Error:', error.message);
+                                            console.warn('[CHAT SERVER] processBuffer: Discarding invalid JSON object due to parse error. Segment snippet:', jsonObjectStr.substring(0,200), 'Error:', error.message);
                                         }
                                         buffer = buffer.substring(i + 1);
+                                        console.log(`[CHAT SERVER DEBUG] Buffer after processing object: '${buffer.substring(0,50).replace(/\n/g, "\\n")}'`);
                                         objectStartIndex = -1;
-                                        // Reset inString as we are now outside the processed object.
-                                        // The next iteration will determine if we enter a new string.
                                         inString = false; 
-                                        i = -1; // Restart scan from the beginning of the modified buffer
+                                        console.log(`[CHAT SERVER DEBUG] State after object processing: objectStartIndex=${objectStartIndex}, inString=${inString}`);
+                                        i = -1; 
                                     }
                                 } else if (braceDepth < 0) { 
-                                    console.warn(`[CHAT SERVER] processBuffer: braceDepth became negative (${braceDepth}) at char '${char}', i=${i}. Resetting object search. Buffer: '${buffer.substring(0,50)}'`);
-                                    objectStartIndex = -1; // Reset search, something is wrong
-                                    braceDepth = 0; // Correct braceDepth
+                                    console.warn(`[CHAT SERVER DEBUG] braceDepth became negative (${braceDepth}) at char '${char}', i=${i}. Resetting. Buffer: '${buffer.substring(0,50).replace(/\n/g, "\\n")}'`);
+                                    objectStartIndex = -1; 
+                                    braceDepth = 0; 
+                                    inString = false; 
                                 }
                             }
                         }
                         i++;
                     }
-                    // If an object started but wasn't completed, keep the partial object in buffer
+                    
                     if (objectStartIndex !== -1) {
                         buffer = buffer.substring(objectStartIndex);
-                        objectStartIndex = 0; // Relative to the new buffer start
+                        objectStartIndex = 0; 
+                        console.log(`[CHAT SERVER DEBUG] Kept partial object in buffer. New buffer: '${buffer.substring(0,50).replace(/\n/g, "\\n")}', objectStartIndex: ${objectStartIndex}`);
                     } else {
-                         // If no object started, and buffer might contain junk like ']', ',', clear it.
-                        if (!buffer.includes("{")) buffer = "";
+                        const trimmedBuffer = buffer.trim();
+                        // Only look for '{' as we only care about objects now
+                        if (!buffer.includes("{") && (trimmedBuffer.length === 0 || trimmedBuffer === ',' || trimmedBuffer === ']' || trimmedBuffer === ',]')) {
+                            // console.log('[CHAT SERVER DEBUG] Clearing residual buffer content:', buffer.replace(/\n/g, "\\n"));
+                            buffer = "";
+                        }
                     }
                 }
 
@@ -179,15 +175,18 @@ export const POST: RequestHandler = async ({ request }) => {
                                 break;
                             }
                             readAnyData = true;
-                            const decodedChunkForLog = decoder.decode(value, { stream: false }); // Decode fully for reliable logging
-                            console.log('[CHAT SERVER] pump: Read chunk from proxy, length:', decodedChunkForLog.length, 'Content snippet:', decodedChunkForLog.substring(0,100));
+                            const decodedChunkForLog = decoder.decode(value, { stream: false }); 
+                            console.log('[CHAT SERVER] pump: Read chunk from proxy, length:', decodedChunkForLog.length, 'Content snippet:', decodedChunkForLog.substring(0,100).replace(/\n/g, "\\n"));
                             buffer += decoder.decode(value, { stream: true });
+                            console.log(`[CHAT SERVER DEBUG] Buffer after adding chunk: '${buffer.substring(0,100).replace(/\n/g, "\\n")}'`);
                             processBuffer();
                         }
-                        // After the loop, stream is done
-                        buffer += decoder.decode(undefined, { stream: true }); // final flush for TextDecoder
-                        console.log('[CHAT SERVER] pump: Final buffer processing before END_TOKEN. Buffer snippet:', buffer.substring(0,100));
-                        processBuffer(); // process any remaining buffered content
+                        
+                        buffer += decoder.decode(undefined, { stream: true }); 
+                        console.log('[CHAT SERVER DEBUG] Buffer after final decode flush:', buffer.substring(0,100).replace(/\n/g, "\\n"));
+                        console.log('[CHAT SERVER] pump: Final buffer processing before END_TOKEN. Buffer snippet:', buffer.substring(0,100).replace(/\n/g, "\\n"));
+                        processBuffer(); 
+                        
                         console.log('[CHAT SERVER] pump: Enqueuing END_TOKEN.');
                         controller.enqueue(encoder.encode('data: <<STREAM_END>>\n\n'));
                         controller.close();
@@ -210,7 +209,8 @@ export const POST: RequestHandler = async ({ request }) => {
 
     } catch (error) {
         console.error('Chat Backend Error:', error);
-        return new Response(JSON.stringify({ error: 'Chat API failed' }), {
+        const errorMessage = error instanceof Error ? error.message : 'Chat API failed due to unknown error';
+        return new Response(JSON.stringify({ error: errorMessage }), {
             status: 500,
             headers: { 'Content-Type': 'application/json' }
         });
